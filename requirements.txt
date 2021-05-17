@@ -1,0 +1,24 @@
+.[all]
+
+# test requirements
+pre-commit
+black
+mypy
+flake8
+autopep8
+pylint
+pytest
+pytest-cov
+pytest-mock
+pytest-spark
+sphinx>=2.4.0
+sphinx-rtd-theme
+sphinx-autodoc-typehints
+flask
+
+pyspark
+dask[dataframe]
+
+# publish to pypi
+wheel
+twine
