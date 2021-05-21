@@ -11,12 +11,22 @@ class PandasTests(PandasyTestSuite.Tests):
     def make_utils(self) -> PandasyUtils:
         return PandasUtils()
 
-    def to_df(self, data: Any, columns: Any = None, enforce_type: bool = False):
+    def to_pd(self, data: Any) -> pd.DataFrame:
+        assert isinstance(data, pd.DataFrame)
+        return data
+
+    def to_df(
+        self,
+        data: Any,
+        columns: Any = None,
+        enforce_type: bool = True,
+        null_safe: bool = False,
+    ):
         if isinstance(columns, str):
             s = expression_to_schema(columns)
             df = pd.DataFrame(data, columns=s.names)
             if enforce_type:
-                df = self.utils.enforce_type(df, s, True)
+                df = self.utils.enforce_type(df, s, null_safe=null_safe)
         else:
             df = pd.DataFrame(data, columns=columns)
         return df

@@ -76,6 +76,19 @@ class PandasyUtils(Generic[T]):
             ):
                 yield arr
 
+    def as_array(
+        self,
+        df: T,
+        schema: Optional[pa.Schema] = None,
+        columns: Optional[List[str]] = None,
+        type_safe: bool = False,
+    ) -> List[List[Any]]:
+        return list(
+            self.as_array_iterable(
+                df, schema=schema, columns=columns, type_safe=type_safe
+            )
+        )
+
     def to_schema(self, df: T) -> pa.Schema:
         """Extract pandas dataframe schema as pyarrow schema. This is a replacement
         of pyarrow.Schema.from_pandas, and it can correctly handle string type and
@@ -156,7 +169,7 @@ class PandasyUtils(Generic[T]):
             df[v.name] = s
         return df
 
-    def sql_groupy_apply(
+    def sql_groupby_apply(
         self,
         df: T,
         cols: List[str],
