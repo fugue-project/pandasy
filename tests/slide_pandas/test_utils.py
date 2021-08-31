@@ -1,14 +1,14 @@
 from triad.utils.pyarrow import expression_to_schema
-from slide.utils import slideUtils
-from slide_test.suite import slideTestSuite
+from slide.utils import SlideUtils
+from slide_test.suite import SlideTestSuite
 
 from slide_pandas.utils import PandasUtils
 import pandas as pd
 from typing import Any
 
 
-class PandasTests(slideTestSuite.Tests):
-    def make_utils(self) -> slideUtils:
+class PandasTests(SlideTestSuite.Tests):
+    def make_utils(self) -> SlideUtils:
         return PandasUtils()
 
     def to_pd(self, data: Any) -> pd.DataFrame:

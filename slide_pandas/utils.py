@@ -1,8 +1,8 @@
 import pandas as pd
-from slide.utils import slideUtils
+from slide.utils import SlideUtils
 
 
-class PandasUtils(slideUtils[pd.DataFrame]):
+class PandasUtils(SlideUtils[pd.DataFrame]):
     """A collection of pandas utils"""
 
     pass

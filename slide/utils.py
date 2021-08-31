@@ -12,7 +12,7 @@ _DEFAULT_JOIN_KEYS: List[str] = []
 _DEFAULT_DATETIME = datetime(2000, 1, 1)
 
 
-class slideUtils(Generic[T]):
+class SlideUtils(Generic[T]):
     """A collection of utils for general pandas like dataframes"""
 
     def empty(self, df: T) -> bool:
