@@ -1,4 +1,4 @@
-pandasy 
+slide 
 ========
 
 .. |SchemaLikeObject| replace:: :ref:`Schema like object <tutorial:/tutorials/x-like.ipynb#schema>`
@@ -21,10 +21,10 @@ pandasy
 
 
 
-pandasy.dummy
+slide.dummy
 -------------
 
-.. automodule:: pandasy.dummy
+.. automodule:: slide.dummy
    :members:
    :undoc-members:
    :show-inheritance:

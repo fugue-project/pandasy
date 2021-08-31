@@ -7,16 +7,16 @@ from unittest import TestCase
 import numpy as np
 import pandas as pd
 import pyarrow as pa
-from pandasy.utils import PandasyUtils
+from slide.utils import slideUtils
 from pytest import raises
 from triad import Schema
 from triad.utils.pandas_like import _DEFAULT_DATETIME
 from triad.utils.pyarrow import expression_to_schema
 
 
-class PandasyTestSuite(object):
+class slideTestSuite(object):
     """Pandas-like utils test suite.
-    Any new :class:`~pandasy.utils.PandasyUtils` should pass this test suite.
+    Any new :class:`~slide.utils.slideUtils` should pass this test suite.
     """
 
     class Tests(TestCase):
@@ -26,11 +26,11 @@ class PandasyTestSuite(object):
             cls._utils = cls.make_utils(cls)
             pass
 
-        def make_utils(self) -> PandasyUtils:
+        def make_utils(self) -> slideUtils:
             raise NotImplementedError
 
         @property
-        def utils(self) -> PandasyUtils:
+        def utils(self) -> slideUtils:
             return self._utils  # type: ignore
 
         @classmethod

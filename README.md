@@ -1,11 +1,11 @@
-# pandasy
+# slide
 
-[![GitHub release](https://img.shields.io/github/release/fugue-project/pandasy.svg)](https://GitHub.com/fugue-project/pandasy)
-[![PyPI pyversions](https://img.shields.io/pypi/pyversions/pandasy.svg)](https://pypi.python.org/pypi/pandasy/)
-[![PyPI license](https://img.shields.io/pypi/l/pandasy.svg)](https://pypi.python.org/pypi/pandasy/)
-[![PyPI version](https://badge.fury.io/py/pandasy.svg)](https://pypi.python.org/pypi/pandasy/)
-[![Coverage Status](https://coveralls.io/repos/github/fugue-project/pandasy/badge.svg)](https://coveralls.io/github/fugue-project/pandasy)
-[![Doc](https://readthedocs.org/projects/pandasy/badge)](https://pandasy.readthedocs.org)
+[![GitHub release](https://img.shields.io/github/release/fugue-project/slide.svg)](https://GitHub.com/fugue-project/slide)
+[![PyPI pyversions](https://img.shields.io/pypi/pyversions/slide.svg)](https://pypi.python.org/pypi/slide/)
+[![PyPI license](https://img.shields.io/pypi/l/slide.svg)](https://pypi.python.org/pypi/slide/)
+[![PyPI version](https://badge.fury.io/py/slide.svg)](https://pypi.python.org/pypi/slide/)
+[![Coverage Status](https://coveralls.io/repos/github/fugue-project/slide/badge.svg)](https://coveralls.io/github/fugue-project/slide)
+[![Doc](https://readthedocs.org/projects/slide/badge)](https://slide.readthedocs.org)
 
 [![Slack Status](https://img.shields.io/badge/slack-join_chat-white.svg?logo=slack&style=social)](https://join.slack.com/t/fugue-project/shared_invite/zt-jl0pcahu-KdlSOgi~fP50TZWmNxdWYQ)
 
