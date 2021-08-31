@@ -2,7 +2,7 @@ import os
 
 from setuptools import find_packages, setup
 
-from pandasy_version import __version__
+from slide_version import __version__
 
 with open("README.md") as f:
     LONG_DESCRIPTION = f.read()
@@ -29,7 +29,7 @@ setup(
     author="Han Wang",
     author_email="goodwanghan@gmail.com",
     keywords="pandas sql",
-    url="http://github.com/fugue-project/pandasy",
+    url="http://github.com/fugue-project/slide",
     install_requires=["triad", "pandas>=1.1.0", "numpy>=1.19"],
     extras_require={
         "dask": ["dask[dataframe]", "cloudpickle>=1.4.0"],

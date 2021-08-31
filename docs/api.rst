@@ -3,4 +3,4 @@ API Reference
 
 .. toctree::
 
-   api/pandasy
+   api/slide

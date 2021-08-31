@@ -16,12 +16,12 @@ import sys
 
 sys.path.insert(0, os.path.abspath("../"))
 
-from pandasy_version import __version__
+from slide_version import __version__
 import sphinx_rtd_theme
 
 # -- Project information -----------------------------------------------------
 
-project = "pandasy"
+project = "slide"
 version = __version__
 copyright = "2021, Han Wang"  # noqa: A001
 author = "Han Wang"

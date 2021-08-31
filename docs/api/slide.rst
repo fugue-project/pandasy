@@ -1,5 +1,5 @@
-pandasy 
-========
+slide 
+======
 
 .. |SchemaLikeObject| replace:: :ref:`Schema like object <tutorial:/tutorials/x-like.ipynb#schema>`
 .. |ParamsLikeObject| replace:: :ref:`Parameters like object <tutorial:/tutorials/x-like.ipynb#parameters>`
@@ -21,10 +21,10 @@ pandasy
 
 
 
-pandasy.dummy
--------------
+slide.utils
+-----------
 
-.. automodule:: pandasy.dummy
+.. automodule:: slide.utils
    :members:
    :undoc-members:
    :show-inheritance:

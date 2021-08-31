@@ -18,7 +18,7 @@ dev:
 docs:
 	rm -rf docs/api
 	rm -rf docs/build
-	sphinx-apidoc --no-toc -f -t=docs/_templates -o docs/api pandasy/
+	sphinx-apidoc --no-toc -f -t=docs/_templates -o docs/api slide/
 	sphinx-build -b html docs/ docs/build/
 
 lint:

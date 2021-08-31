@@ -1,7 +1,7 @@
 Introduction
 =============
 
-What is pandasy?
+What is slide?
 ----------------
 
-pandasy contains a collection utitily functions that ensure the behaviors of pandas-like dataframes.
+slide contains a collection utitily functions that ensure the behaviors of pandas-like dataframes.
