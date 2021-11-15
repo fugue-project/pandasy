@@ -10,7 +10,6 @@ import pyarrow as pa
 from slide.utils import SlideUtils
 from pytest import raises
 from triad import Schema
-from triad.utils.pandas_like import _DEFAULT_DATETIME
 from triad.utils.pyarrow import expression_to_schema
 
 
@@ -59,6 +58,13 @@ class SlideTestSuite(object):
             # self.native = PD_UTILS.null_safe(df, s, enforce)
 
             raise NotImplementedError
+
+        def test_cols_to_df(self):
+            df = self.to_df([["a", 1]], "a:str,b:long")
+            res = self.utils.cols_to_df([df["b"], df["a"]])
+            self.assert_eq(res, self.to_df([[1, "a"]], "b:long,a:str"))
+            res = self.utils.cols_to_df([df["b"], df["a"]], ["x", "y"])
+            self.assert_eq(res, self.to_df([[1, "a"]], "x:long,y:str"))
 
         def test_to_schema(self):
             df = self.to_df([[1.0, 2], [2.0, 3]])
@@ -235,28 +241,6 @@ class SlideTestSuite(object):
             arr = self.utils.as_array(df, type_safe=True)
             assert [[1, True], [2, False], [3, None]] == arr
 
-        def test_fillna_default(self):
-            df = self.to_df([["a"], [None]], columns=["x"])
-            s = self.utils.fillna_default(df["x"])
-            assert ["a", 0] == s.tolist()
-
-            df = self.to_df([["a"], ["b"]], columns=["x"])
-            s = self.utils.fillna_default(df["x"].astype(np.str_))
-            assert ["a", "b"] == s.tolist()
-
-            dt = datetime.now()
-            df = self.to_df([[dt], [None]], columns=["x"])
-            s = self.utils.fillna_default(df["x"])
-            assert [dt, _DEFAULT_DATETIME] == s.tolist()
-
-            df = self.to_df([[True], [None]], columns=["x"])
-            s = self.utils.fillna_default(df["x"])
-            assert [True, 0] == s.tolist()
-
-            df = self.to_df([[True], [False]], columns=["x"])
-            s = self.utils.fillna_default(df["x"].astype(bool))
-            assert [True, False] == s.tolist()
-
         def test_sql_group_by_apply(self):
             df = self.to_df(
                 [["a", 1], ["a", 2], [None, 3]], "b:str,c:long", null_safe=True
@@ -295,8 +279,8 @@ class SlideTestSuite(object):
         def test_sql_group_by_apply_special_types(self):
             def _m1(df):
                 self.utils.ensure_compatible(df)
-                df["ct"] = df.shape[0]
-                return df
+                # df["ct"] = df.shape[0]
+                return df.assign(ct=df.shape[0])
 
             df = self.to_df(
                 [["a", 1.0], [None, 3.0], [None, 3.0], [None, None]],
