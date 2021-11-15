@@ -28,6 +28,7 @@ class PandasUtils(SlideUtils[pd.DataFrame, pd.Series]):
         **kwargs: Any,
     ) -> pd.DataFrame:
         if pd.__version__ < "1.2":  # pragma: no cover
+            # https://github.com/pandas-dev/pandas/issues/35889
             return self._sql_groupby_apply_older_version(df, cols, func, **kwargs)
         self.ensure_compatible(df)
         if len(cols) == 0:
