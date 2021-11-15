@@ -30,7 +30,7 @@ setup(
     author_email="goodwanghan@gmail.com",
     keywords="pandas sql",
     url="http://github.com/fugue-project/slide",
-    install_requires=["triad", "pandas<=1.2.0", "numpy>=1.19"],
+    install_requires=["triad", "pandas>=1.1.0", "numpy>=1.19"],
     extras_require={
         "dask": ["dask[dataframe]", "cloudpickle>=1.4.0"],
         "ray": ["pandas>=1.1.2", "modin[ray]>=0.8.1.1"],

@@ -216,14 +216,7 @@ class SlideUtils(Generic[TDF, TCol]):
         The dataframe must be either empty, or with type pd.RangeIndex, pd.Int64Index
         or pd.UInt64Index and without a name, otherwise, `ValueError` will raise.
         """
-        self.ensure_compatible(df)
-        if len(cols) == 0:
-            return func(df)
-        return (
-            df.groupby(cols, dropna=False)
-            .apply(lambda df: func(df.reset_index(drop=True)), **kwargs)
-            .reset_index(drop=True)
-        )
+        raise NotImplementedError  # pragma: no cover
 
     def is_compatile_index(self, df: TDF) -> bool:
         """Check whether the datafame is compatible with the operations inside
