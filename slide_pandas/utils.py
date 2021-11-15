@@ -17,8 +17,7 @@ class PandasUtils(SlideUtils[pd.DataFrame, pd.Series]):
     ) -> pd.DataFrame:
         if names is None:
             return pd.DataFrame({c.name: c for c in cols})
-        else:
-            return pd.DataFrame({name: c for name, c in zip(names, cols)})
+        return pd.DataFrame({name: c for name, c in zip(names, cols)})
 
     def sql_groupby_apply(
         self,
