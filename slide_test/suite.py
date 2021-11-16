@@ -7,10 +7,12 @@ from unittest import TestCase
 import numpy as np
 import pandas as pd
 import pyarrow as pa
-from slide.utils import SlideUtils
 from pytest import raises
+from slide.utils import SlideUtils
 from triad import Schema
 from triad.utils.pyarrow import expression_to_schema
+
+from slide_test.utils import assert_duck_eq, assert_pdf_eq, make_rand_df
 
 
 class SlideTestSuite(object):
@@ -40,11 +42,6 @@ class SlideTestSuite(object):
         def to_pd(self, data: Any) -> pd.DataFrame:
             raise NotImplementedError
 
-        def assert_eq(self, df1, df2) -> None:
-            _1 = self.to_pd(df1)
-            _2 = self.to_pd(df2)
-            pd.testing.assert_frame_equal(_1, _2, check_dtype=False)
-
         def to_df(
             self,
             data: Any,
@@ -62,9 +59,9 @@ class SlideTestSuite(object):
         def test_cols_to_df(self):
             df = self.to_df([["a", 1]], "a:str,b:long")
             res = self.utils.cols_to_df([df["b"], df["a"]])
-            self.assert_eq(res, self.to_df([[1, "a"]], "b:long,a:str"))
+            assert_pdf_eq(res, self.to_pd(self.to_df([[1, "a"]], "b:long,a:str")))
             res = self.utils.cols_to_df([df["b"], df["a"]], ["x", "y"])
-            self.assert_eq(res, self.to_df([[1, "a"]], "x:long,y:str"))
+            assert_pdf_eq(res, self.to_pd(self.to_df([[1, "a"]], "x:long,y:str")))
 
         def test_to_schema(self):
             df = self.to_df([[1.0, 2], [2.0, 3]])
@@ -291,13 +288,20 @@ class SlideTestSuite(object):
             self.utils.ensure_compatible(res)
             assert 4 == res.shape[0]
             assert 3 == res.shape[1]
-            self.assert_eq(
-                self.to_df(
-                    [["a", 1.0, 1], [None, 3.0, 2], [None, 3.0, 2], [None, None, 1]],
-                    "a:str,b:double,ct:int",
-                    null_safe=True,
+            assert_pdf_eq(
+                self.to_pd(
+                    self.to_df(
+                        [
+                            ["a", 1.0, 1],
+                            [None, 3.0, 2],
+                            [None, 3.0, 2],
+                            [None, None, 1],
+                        ],
+                        "a:str,b:double,ct:int",
+                        null_safe=True,
+                    )
                 ),
-                res,
+                self.to_pd(res),
             )
 
             dt = datetime.now()
@@ -310,13 +314,15 @@ class SlideTestSuite(object):
             self.utils.ensure_compatible(res)
             assert 4 == res.shape[0]
             assert 3 == res.shape[1]
-            self.assert_eq(
-                self.to_df(
-                    [["a", dt, 1], [None, dt, 2], [None, dt, 2], [None, None, 1]],
-                    "a:str,b:datetime,ct:int",
-                    null_safe=True,
+            assert_pdf_eq(
+                self.to_pd(
+                    self.to_df(
+                        [["a", dt, 1], [None, dt, 2], [None, dt, 2], [None, None, 1]],
+                        "a:str,b:datetime,ct:int",
+                        null_safe=True,
+                    )
                 ),
-                res,
+                self.to_pd(res),
             )
 
             dt = date(2020, 1, 1)
@@ -329,13 +335,15 @@ class SlideTestSuite(object):
             self.utils.ensure_compatible(res)
             assert 4 == res.shape[0]
             assert 3 == res.shape[1]
-            self.assert_eq(
-                self.to_df(
-                    [["a", dt, 1], [None, dt, 2], [None, dt, 2], [None, None, 1]],
-                    "a:str,b:date,ct:int",
-                    null_safe=True,
+            assert_pdf_eq(
+                self.to_pd(
+                    self.to_df(
+                        [["a", dt, 1], [None, dt, 2], [None, dt, 2], [None, None, 1]],
+                        "a:str,b:date,ct:int",
+                        null_safe=True,
+                    )
                 ),
-                res,
+                self.to_pd(res),
             )
 
             dt = date(2020, 1, 1)
@@ -348,11 +356,375 @@ class SlideTestSuite(object):
             self.utils.ensure_compatible(res)
             assert 4 == res.shape[0]
             assert 3 == res.shape[1]
-            self.assert_eq(
-                self.to_df(
-                    [["a", dt, 1], ["b", dt, 2], ["b", dt, 2], ["b", None, 1]],
-                    "a:str,b:date,ct:int",
-                    null_safe=True,
+            assert_pdf_eq(
+                self.to_pd(
+                    self.to_df(
+                        [["a", dt, 1], ["b", dt, 2], ["b", dt, 2], ["b", None, 1]],
+                        "a:str,b:date,ct:int",
+                        null_safe=True,
+                    )
                 ),
-                res,
+                self.to_pd(res),
+            )
+
+        def test_drop_duplicates(self):
+            def assert_eq(df1, df2):
+                d1 = self.to_pd(self.utils.drop_duplicates(df1))
+                assert_pdf_eq(d1, self.to_pd(df2), check_order=False)
+
+            a = self.to_df([["x", "a"], ["x", "a"], [None, None]], ["a", "b"])
+            assert_eq(a, pd.DataFrame([["x", "a"], [None, None]], columns=["a", "b"]))
+
+        def test_drop_duplicates_sql(self):
+            df = make_rand_df(100, a=int, b=int)
+            assert_duck_eq(
+                self.to_pd(self.utils.drop_duplicates(df)),
+                "SELECT DISTINCT * FROM a",
+                a=df,
+                check_order=False,
+            )
+
+            df = make_rand_df(100, a=(int, 50), b=(int, 50))
+            assert_duck_eq(
+                self.to_pd(self.utils.drop_duplicates(df)),
+                "SELECT DISTINCT * FROM a",
+                a=df,
+                check_order=False,
+            )
+
+            df = make_rand_df(100, a=(int, 50), b=(str, 50), c=float)
+            assert_duck_eq(
+                self.to_pd(self.utils.drop_duplicates(df)),
+                "SELECT DISTINCT * FROM a",
+                a=df,
+                check_order=False,
+            )
+
+            df = make_rand_df(100, a=(int, 50), b=(datetime, 50), c=float)
+            assert_duck_eq(
+                self.to_pd(self.utils.drop_duplicates(df)),
+                "SELECT DISTINCT * FROM a",
+                a=df,
+                check_order=False,
+            )
+
+        def test_union(self):
+            def assert_eq(df1, df2, unique, expected, expected_cols):
+                res = self.to_pd(self.utils.union(df1, df2, unique=unique))
+                assert_pdf_eq(
+                    res,
+                    pd.DataFrame(expected, columns=expected_cols),
+                    check_order=False,
+                )
+
+            a = self.to_df([["x", "a"], ["x", "a"], [None, None]], ["a", "b"])
+            b = self.to_df([["xx", "aa"], [None, None], ["a", "x"]], ["b", "a"])
+            assert_eq(
+                a,
+                b,
+                False,
+                [
+                    ["x", "a"],
+                    ["x", "a"],
+                    [None, None],
+                    ["xx", "aa"],
+                    [None, None],
+                    ["a", "x"],
+                ],
+                ["a", "b"],
+            )
+            assert_eq(
+                a,
+                b,
+                True,
+                [["x", "a"], ["xx", "aa"], [None, None], ["a", "x"]],
+                ["a", "b"],
+            )
+
+        def test_union_sql(self):
+            a = make_rand_df(30, b=(int, 10), c=(str, 10), d=(datetime, 10))
+            b = make_rand_df(80, b=(int, 50), c=(str, 50), d=(datetime, 50))
+            c = make_rand_df(100, b=(int, 50), c=(str, 50), d=(datetime, 50))
+            d = self.to_pd(
+                self.utils.union(self.utils.union(a, b, unique=True), c, unique=True)
+            )
+            assert_duck_eq(
+                d,
+                """
+                SELECT * FROM a
+                    UNION SELECT * FROM b
+                    UNION SELECT * FROM c
+                """,
+                a=a,
+                b=b,
+                c=c,
+            )
+            e = self.to_pd(
+                self.utils.union(self.utils.union(a, b, unique=False), c, unique=False)
+            )
+            assert_duck_eq(
+                e,
+                """
+                SELECT * FROM a
+                    UNION ALL SELECT * FROM b
+                    UNION ALL SELECT * FROM c
+                """,
+                a=a,
+                b=b,
+                c=c,
+            )
+
+        def test_intersect(self):
+            def assert_eq(df1, df2, unique, expected, expected_cols):
+                res = self.to_pd(self.utils.intersect(df1, df2, unique=unique))
+                assert_pdf_eq(res, expected, expected_cols)
+
+            a = self.to_df([["x", "a"], ["x", "a"], [None, None]], ["a", "b"])
+            b = self.to_df(
+                [["xx", "aa"], [None, None], [None, None], ["a", "x"]], ["b", "a"]
+            )
+            assert_eq(a, b, False, [[None, None]], ["a", "b"])
+            assert_eq(a, b, True, [[None, None]], ["a", "b"])
+            b = self.to_df([["xx", "aa"], [None, None], ["x", "a"]], ["b", "a"])
+            assert_eq(a, b, False, [["x", "a"], ["x", "a"], [None, None]], ["a", "b"])
+            assert_eq(a, b, True, [["x", "a"], [None, None]], ["a", "b"])
+
+        def test_intersect_sql(self):
+            a = make_rand_df(30, b=(int, 10), c=(str, 10))
+            b = make_rand_df(80, b=(int, 50), c=(str, 50))
+            c = make_rand_df(100, b=(int, 50), c=(str, 50))
+            d = self.to_pd(
+                self.utils.intersect(
+                    self.utils.intersect(c, b, unique=True), a, unique=True
+                )
+            )
+            assert_duck_eq(
+                d,
+                """
+                SELECT * FROM c
+                    INTERSECT SELECT * FROM b
+                    INTERSECT SELECT * FROM a
+                """,
+                a=a,
+                b=b,
+                c=c,
+            )
+
+        def test_except(self):
+            def assert_eq(df1, df2, unique, expected, expected_cols):
+                res = self.to_pd(self.utils.except_df(df1, df2, unique=unique))
+                assert_pdf_eq(res, expected, expected_cols)
+
+            a = self.to_df([["x", "a"], ["x", "a"], [None, None]], ["a", "b"])
+            b = self.to_df([["xx", "aa"], [None, None], ["a", "x"]], ["b", "a"])
+            assert_eq(a, b, False, [["x", "a"], ["x", "a"]], ["a", "b"])
+            assert_eq(a, b, True, [["x", "a"]], ["a", "b"])
+            b = self.to_df([["xx", "aa"], [None, None], ["x", "a"]], ["b", "a"])
+            assert_eq(a, b, False, [], ["a", "b"])
+            assert_eq(a, b, True, [], ["a", "b"])
+
+        def test_except_sql(self):
+            a = make_rand_df(30, b=(int, 10), c=(str, 10))
+            b = make_rand_df(80, b=(int, 50), c=(str, 50))
+            c = make_rand_df(100, b=(int, 50), c=(str, 50))
+            d = self.to_pd(
+                self.utils.except_df(
+                    self.utils.except_df(c, b, unique=True), a, unique=True
+                )
+            )
+            assert_duck_eq(
+                d,
+                """
+                SELECT * FROM c
+                    EXCEPT SELECT * FROM b
+                    EXCEPT SELECT * FROM a
+                """,
+                a=a,
+                b=b,
+                c=c,
+            )
+
+        def test_joins(self):
+            def assert_eq(df1, df2, join_type, on, expected, expected_cols):
+                res = self.to_pd(self.utils.join(df1, df2, join_type=join_type, on=on))
+                assert_pdf_eq(res, expected, expected_cols, check_order=False)
+
+            df1 = self.to_df([[0, 1], [2, 3]], ["a", "b"])
+            df2 = self.to_df([[0, 10], [20, 30]], ["a", "c"])
+            df3 = self.to_df([[0, 1], [None, 3]], ["a", "b"])
+            df4 = self.to_df([[0, 10], [None, 30]], ["a", "c"])
+            assert_eq(df1, df2, "inner", ["a"], [[0, 1, 10]], ["a", "b", "c"])
+            assert_eq(df3, df4, "inner", ["a"], [[0, 1, 10]], ["a", "b", "c"])
+            assert_eq(df1, df2, "left_semi", ["a"], [[0, 1]], ["a", "b"])
+            assert_eq(df3, df4, "left_semi", ["a"], [[0, 1]], ["a", "b"])
+            assert_eq(df1, df2, "left_anti", ["a"], [[2, 3]], ["a", "b"])
+            assert_eq(df3, df4, "left_anti", ["a"], [[None, 3]], ["a", "b"])
+            assert_eq(
+                df1,
+                df2,
+                "left_outer",
+                ["a"],
+                [[0, 1, 10], [2, 3, None]],
+                ["a", "b", "c"],
+            )
+            assert_eq(
+                df3,
+                df4,
+                "left_outer",
+                ["a"],
+                [[0, 1, 10], [None, 3, None]],
+                ["a", "b", "c"],
+            )
+            assert_eq(
+                df1,
+                df2,
+                "right_outer",
+                ["a"],
+                [[0, 1, 10], [20, None, 30]],
+                ["a", "b", "c"],
+            )
+            assert_eq(
+                df3,
+                df4,
+                "right_outer",
+                ["a"],
+                [[0, 1, 10], [None, None, 30]],
+                ["a", "b", "c"],
+            )
+            assert_eq(
+                df1,
+                df2,
+                "full_outer",
+                ["a"],
+                [[0, 1, 10], [2, 3, None], [20, None, 30]],
+                ["a", "b", "c"],
+            )
+            assert_eq(
+                df3,
+                df4,
+                "full_outer",
+                ["a"],
+                [[0, 1, 10], [None, 3, None], [None, None, 30]],
+                ["a", "b", "c"],
+            )
+
+            df1 = self.to_df([[0, 1], [None, 3]], ["a", "b"])
+            df2 = self.to_df([[0, 10], [None, 30]], ["c", "d"])
+            assert_eq(
+                df1,
+                df2,
+                "cross",
+                [],
+                [
+                    [0, 1, 0, 10],
+                    [None, 3, 0, 10],
+                    [0, 1, None, 30],
+                    [None, 3, None, 30],
+                ],
+                ["a", "b", "c", "d"],
+            )
+
+        def test_join_inner_sql(self):
+            a = make_rand_df(100, a=(int, 40), b=(str, 40), c=(float, 40))
+            b = make_rand_df(80, d=(float, 10), a=(int, 10), b=(str, 10))
+            assert_duck_eq(
+                self.to_df(self.utils.join(a, b, "inner", on=["a", "b"])),
+                "SELECT a.*, d FROM a INNER JOIN b ON a.a=b.a AND a.b=b.b",
+                a=a,
+                b=b,
+                check_order=False,
+            )
+
+        def test_join_left_sql(self):
+            a = make_rand_df(100, a=(int, 40), b=(str, 40), c=(float, 40))
+            b = make_rand_df(80, d=(float, 10), a=(int, 10), b=(str, 10))
+            assert_duck_eq(
+                self.to_df(self.utils.join(a, b, "left", on=["a", "b"])),
+                "SELECT a.*, d FROM a LEFT JOIN b ON a.a=b.a AND a.b=b.b",
+                a=a,
+                b=b,
+                check_order=False,
+            )
+
+        def test_join_right_sql(self):
+            a = make_rand_df(100, a=(int, 40), b=(str, 40), c=(float, 40))
+            b = make_rand_df(80, d=(float, 10), a=(int, 10), b=(str, 10))
+            assert_duck_eq(
+                self.to_df(self.utils.join(a, b, "right", on=["a", "b"])),
+                "SELECT c, b.* FROM a RIGHT JOIN b ON a.a=b.a AND a.b=b.b",
+                a=a,
+                b=b,
+                check_order=False,
+            )
+
+        def test_join_full_sql(self):
+            a = make_rand_df(100, a=(int, 40), b=(str, 40), c=(float, 40))
+            b = make_rand_df(80, d=(float, 10), a=(int, 10), b=(str, 10))
+            assert_duck_eq(
+                self.to_df(self.utils.join(a, b, "full", on=["a", "b"])),
+                """SELECT COALESCE(a.a, b.a) AS a, COALESCE(a.b, b.b) AS b, c, d
+                FROM a FULL JOIN b ON a.a=b.a AND a.b=b.b""",
+                a=a,
+                b=b,
+                check_order=False,
+            )
+
+        def test_join_cross_sql(self):
+            a = make_rand_df(10, a=(int, 4), b=(str, 4), c=(float, 4))
+            b = make_rand_df(20, dd=(float, 1), aa=(int, 1), bb=(str, 1))
+            assert_duck_eq(
+                self.to_df(self.utils.join(a, b, "cross", on=[])),
+                "SELECT * FROM a CROSS JOIN b",
+                a=a,
+                b=b,
+                check_order=False,
+            )
+
+        def test_join_semi(self):
+            a = make_rand_df(100, a=(int, 40), b=(str, 40), c=(float, 40))
+            b = make_rand_df(80, d=(float, 10), a=(int, 10), b=(str, 10))
+            assert_duck_eq(
+                self.to_df(self.utils.join(a, b, "semi", on=["a", "b"])),
+                """SELECT a.* FROM a INNER JOIN (SELECT DISTINCT a,b FROM b) x
+                ON a.a=x.a AND a.b=x.b
+                """,
+                a=a,
+                b=b,
+                check_order=False,
+            )
+
+        def test_join_anti(self):
+            a = make_rand_df(100, a=(int, 40), b=(str, 40), c=(float, 40))
+            b = make_rand_df(80, d=(float, 10), a=(int, 10), b=(str, 10))
+            assert_duck_eq(
+                self.to_df(self.utils.join(a, b, "anti", on=["a", "b"])),
+                """SELECT a.* FROM a LEFT JOIN (SELECT a,b, 1 AS z FROM b) x
+                ON a.a=x.a AND a.b=x.b WHERE z IS NULL
+                """,
+                a=a,
+                b=b,
+                check_order=False,
+            )
+
+        def test_join_multi_sql(self):
+            a = make_rand_df(100, a=(int, 40), b=(str, 40), c=(float, 40))
+            b = make_rand_df(80, d=(float, 10), a=(int, 10), b=(str, 10))
+            c = make_rand_df(80, dd=(float, 10), a=(int, 10), b=(str, 10))
+            assert_duck_eq(
+                self.to_df(
+                    self.utils.join(
+                        self.utils.join(a, b, "inner", on=["a", "b"]),
+                        c,
+                        "inner",
+                        on=["a", "b"],
+                    )
+                ),
+                """
+                SELECT a.*,d,dd FROM a
+                    INNER JOIN b ON a.a=b.a AND a.b=b.b
+                    INNER JOIN c ON a.a=c.a AND c.b=b.b
+                """,
+                a=a,
+                b=b,
+                c=c,
             )

@@ -18,6 +18,7 @@ flask
 
 pyspark
 dask[dataframe]
+duckdb
 
 # publish to pypi
 wheel

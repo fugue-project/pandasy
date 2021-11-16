@@ -35,6 +35,7 @@ setup(
         "dask": ["dask[dataframe]", "cloudpickle>=1.4.0"],
         "ray": ["pandas>=1.1.2", "modin[ray]>=0.8.1.1"],
         "all": ["dask[dataframe]", "cloudpickle>=1.4.0", "modin[ray]"],
+        "test": ["duckdb"],
     },
     classifiers=[
         # "3 - Alpha", "4 - Beta" or "5 - Production/Stable"
