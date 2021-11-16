@@ -23,6 +23,18 @@ _CROSS_INDICATOR = "__corss_indicator__"
 
 
 def parse_join_type(join_type: str) -> str:
+    """Parse and normalize join type string. The normalization
+    will lower the string, remove all space and ``_``, and then
+    map to the limited options.
+
+    Here are the options after normalization: ``inner``, ``cross``,
+    ``left_semi``, ``left_anti``, ``left_outer``, ``right_outer``,
+    ``full_outer``.
+
+    :param join_type: the raw join type string
+    :raises NotImplementedError: if not supported
+    :return: the normalized join type string
+    """
     join_type = join_type.replace(" ", "").replace("_", "").lower()
     if join_type in ["inner", "cross"]:
         return join_type
@@ -345,6 +357,23 @@ class SlideUtils(Generic[TDF, TCol]):
         anti_indicator_col: str = _ANTI_INDICATOR,
         cross_indicator_col: str = _CROSS_INDICATOR,
     ) -> TDF:
+        """Join two dataframes.
+
+        :param ndf1: the first dataframe
+        :param ndf2: the second dataframe
+        :param join_type: see :func:`~.parse_join_type`
+        :param on: join keys for pandas like ``merge`` to use
+        :param anti_indicator_col: temporary column name for anti join,
+            defaults to _ANTI_INDICATOR
+        :param cross_indicator_col: temporary column name for cross join,
+            defaults to _CROSS_INDICATOR
+        :raises NotImplementedError: if join type is not supported
+        :return: the joined dataframe
+
+        .. note:
+
+        All join behaviors should be consistent with SQL correspondent joins.
+        """
         join_type = parse_join_type(join_type)
         if join_type == "inner":
             ndf1 = ndf1.dropna(subset=on)

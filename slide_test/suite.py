@@ -510,6 +510,26 @@ class SlideTestSuite(object):
                 c=c,
             )
 
+            a = make_rand_df(30, b=(int, 10), c=(datetime, 10))
+            b = make_rand_df(80, b=(int, 50), c=(datetime, 50))
+            c = make_rand_df(100, b=(int, 50), c=(datetime, 50))
+            d = self.to_pd(
+                self.utils.intersect(
+                    self.utils.intersect(c, b, unique=True), a, unique=True
+                )
+            )
+            assert_duck_eq(
+                d,
+                """
+                SELECT * FROM c
+                    INTERSECT SELECT * FROM b
+                    INTERSECT SELECT * FROM a
+                """,
+                a=a,
+                b=b,
+                c=c,
+            )
+
         def test_except(self):
             def assert_eq(df1, df2, unique, expected, expected_cols):
                 res = self.to_pd(self.utils.except_df(df1, df2, unique=unique))
@@ -527,6 +547,26 @@ class SlideTestSuite(object):
             a = make_rand_df(30, b=(int, 10), c=(str, 10))
             b = make_rand_df(80, b=(int, 50), c=(str, 50))
             c = make_rand_df(100, b=(int, 50), c=(str, 50))
+            d = self.to_pd(
+                self.utils.except_df(
+                    self.utils.except_df(c, b, unique=True), a, unique=True
+                )
+            )
+            assert_duck_eq(
+                d,
+                """
+                SELECT * FROM c
+                    EXCEPT SELECT * FROM b
+                    EXCEPT SELECT * FROM a
+                """,
+                a=a,
+                b=b,
+                c=c,
+            )
+
+            a = make_rand_df(30, b=(int, 10), c=(datetime, 10))
+            b = make_rand_df(80, b=(int, 50), c=(datetime, 50))
+            c = make_rand_df(100, b=(int, 50), c=(datetime, 50))
             d = self.to_pd(
                 self.utils.except_df(
                     self.utils.except_df(c, b, unique=True), a, unique=True
@@ -625,8 +665,8 @@ class SlideTestSuite(object):
             )
 
         def test_join_inner_sql(self):
-            a = make_rand_df(100, a=(int, 40), b=(str, 40), c=(float, 40))
-            b = make_rand_df(80, d=(float, 10), a=(int, 10), b=(str, 10))
+            a = make_rand_df(100, a=(int, 40), b=(datetime, 40), c=(float, 40))
+            b = make_rand_df(80, d=(float, 10), a=(int, 10), b=(datetime, 10))
             assert_duck_eq(
                 self.to_df(self.utils.join(a, b, "inner", on=["a", "b"])),
                 "SELECT a.*, d FROM a INNER JOIN b ON a.a=b.a AND a.b=b.b",
@@ -636,8 +676,8 @@ class SlideTestSuite(object):
             )
 
         def test_join_left_sql(self):
-            a = make_rand_df(100, a=(int, 40), b=(str, 40), c=(float, 40))
-            b = make_rand_df(80, d=(float, 10), a=(int, 10), b=(str, 10))
+            a = make_rand_df(100, a=(int, 40), b=(datetime, 40), c=(float, 40))
+            b = make_rand_df(80, d=(float, 10), a=(int, 10), b=(datetime, 10))
             assert_duck_eq(
                 self.to_df(self.utils.join(a, b, "left", on=["a", "b"])),
                 "SELECT a.*, d FROM a LEFT JOIN b ON a.a=b.a AND a.b=b.b",
@@ -647,8 +687,8 @@ class SlideTestSuite(object):
             )
 
         def test_join_right_sql(self):
-            a = make_rand_df(100, a=(int, 40), b=(str, 40), c=(float, 40))
-            b = make_rand_df(80, d=(float, 10), a=(int, 10), b=(str, 10))
+            a = make_rand_df(100, a=(int, 40), b=(datetime, 40), c=(float, 40))
+            b = make_rand_df(80, d=(float, 10), a=(int, 10), b=(datetime, 10))
             assert_duck_eq(
                 self.to_df(self.utils.join(a, b, "right", on=["a", "b"])),
                 "SELECT c, b.* FROM a RIGHT JOIN b ON a.a=b.a AND a.b=b.b",
@@ -658,8 +698,8 @@ class SlideTestSuite(object):
             )
 
         def test_join_full_sql(self):
-            a = make_rand_df(100, a=(int, 40), b=(str, 40), c=(float, 40))
-            b = make_rand_df(80, d=(float, 10), a=(int, 10), b=(str, 10))
+            a = make_rand_df(100, a=(int, 40), b=(datetime, 40), c=(float, 40))
+            b = make_rand_df(80, d=(float, 10), a=(int, 10), b=(datetime, 10))
             assert_duck_eq(
                 self.to_df(self.utils.join(a, b, "full", on=["a", "b"])),
                 """SELECT COALESCE(a.a, b.a) AS a, COALESCE(a.b, b.b) AS b, c, d
@@ -670,8 +710,8 @@ class SlideTestSuite(object):
             )
 
         def test_join_cross_sql(self):
-            a = make_rand_df(10, a=(int, 4), b=(str, 4), c=(float, 4))
-            b = make_rand_df(20, dd=(float, 1), aa=(int, 1), bb=(str, 1))
+            a = make_rand_df(10, a=(int, 4), b=(datetime, 4), c=(float, 4))
+            b = make_rand_df(20, dd=(float, 1), aa=(int, 1), bb=(datetime, 1))
             assert_duck_eq(
                 self.to_df(self.utils.join(a, b, "cross", on=[])),
                 "SELECT * FROM a CROSS JOIN b",
@@ -681,8 +721,8 @@ class SlideTestSuite(object):
             )
 
         def test_join_semi(self):
-            a = make_rand_df(100, a=(int, 40), b=(str, 40), c=(float, 40))
-            b = make_rand_df(80, d=(float, 10), a=(int, 10), b=(str, 10))
+            a = make_rand_df(100, a=(int, 40), b=(datetime, 40), c=(float, 40))
+            b = make_rand_df(80, d=(float, 10), a=(int, 10), b=(datetime, 10))
             assert_duck_eq(
                 self.to_df(self.utils.join(a, b, "semi", on=["a", "b"])),
                 """SELECT a.* FROM a INNER JOIN (SELECT DISTINCT a,b FROM b) x
@@ -694,8 +734,8 @@ class SlideTestSuite(object):
             )
 
         def test_join_anti(self):
-            a = make_rand_df(100, a=(int, 40), b=(str, 40), c=(float, 40))
-            b = make_rand_df(80, d=(float, 10), a=(int, 10), b=(str, 10))
+            a = make_rand_df(100, a=(int, 40), b=(datetime, 40), c=(float, 40))
+            b = make_rand_df(80, d=(float, 10), a=(int, 10), b=(datetime, 10))
             assert_duck_eq(
                 self.to_df(self.utils.join(a, b, "anti", on=["a", "b"])),
                 """SELECT a.* FROM a LEFT JOIN (SELECT a,b, 1 AS z FROM b) x
@@ -707,9 +747,9 @@ class SlideTestSuite(object):
             )
 
         def test_join_multi_sql(self):
-            a = make_rand_df(100, a=(int, 40), b=(str, 40), c=(float, 40))
-            b = make_rand_df(80, d=(float, 10), a=(int, 10), b=(str, 10))
-            c = make_rand_df(80, dd=(float, 10), a=(int, 10), b=(str, 10))
+            a = make_rand_df(100, a=(int, 40), b=(datetime, 40), c=(float, 40))
+            b = make_rand_df(80, d=(float, 10), a=(int, 10), b=(datetime, 10))
+            c = make_rand_df(80, dd=(float, 10), a=(int, 10), b=(datetime, 10))
             assert_duck_eq(
                 self.to_df(
                     self.utils.join(
