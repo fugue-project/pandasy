@@ -56,6 +56,138 @@ class SlideTestSuite(object):
 
             raise NotImplementedError
 
+        def test_is_series(self):
+            df = self.to_df([["a", 1]], "a:str,b:long")
+            assert self.utils.is_series(df["a"])
+            assert not self.utils.is_series(None)
+            assert not self.utils.is_series(1)
+            assert not self.utils.is_series("abc")
+
+        def test_unary_arithmetic_op(self):
+            pdf = pd.DataFrame([[2.0], [0.0], [None], [-3.0]], columns=["a"])
+            df = self.to_df(pdf)
+            df["a"] = self.utils.unary_arithmetic_op(df["a"], "+")
+            assert_pdf_eq(self.to_pd(df), pdf)
+            df["a"] = self.utils.unary_arithmetic_op(df["a"], "-")
+            pdf = pd.DataFrame([[-2.0], [0.0], [None], [3.0]], columns=["a"])
+            assert_pdf_eq(self.to_pd(df), pdf)
+            df["a"] = self.utils.unary_arithmetic_op(-10.1, "-")
+            pdf = pd.DataFrame([[10.1], [10.1], [10.1], [10.1]], columns=["a"])
+            assert_pdf_eq(self.to_pd(df), pdf)
+            raises(
+                NotImplementedError,
+                lambda: self.utils.unary_arithmetic_op(df["a"], "]"),
+            )
+
+        def test_binary_arithmetic_op(self):
+            def test_(pdf: pd.DataFrame, op: str):
+                df = self.to_df(pdf)
+                df["d"] = self.utils.binary_arithmetic_op(pdf.a, pdf.b, op)
+                df["e"] = self.utils.binary_arithmetic_op(pdf.a, 1.0, op)
+                df["f"] = self.utils.binary_arithmetic_op(1.0, pdf.b, op)
+                df["g"] = self.utils.binary_arithmetic_op(1.0, 2.0, op)
+                df["h"] = self.utils.binary_arithmetic_op(1.0, pdf.c, op)
+                df["i"] = self.utils.binary_arithmetic_op(pdf.a, pdf.c, op)
+
+                assert_duck_eq(
+                    self.to_pd(df[list("defghi")]),
+                    f"""
+                    SELECT
+                        a{op}b AS d, a{op}1.0 AS e, 1.0{op}b AS f,
+                        1.0{op}2.0 AS g, 1.0{op}c AS h, a{op}c AS i
+                    FROM pdf
+                    """,
+                    pdf=pdf,
+                    check_order=False,
+                )
+
+            pdf = pd.DataFrame(
+                dict(
+                    a=[1.0, 2.0, 3.0, 4.0],
+                    b=[2.0, 2.0, 0.1, 2.0],
+                    c=[1.0, None, 1.0, float("nan")],
+                )
+            )
+            test_(pdf, "+")
+            test_(pdf, "-")
+            test_(pdf, "*")
+            test_(pdf, "/")
+
+            # Integer division and dividing by 0 do not have consistent behaviors
+            # on different SQL engines. So we can't unify.
+            # SELECT 1.0/0.0 AS x, 1/2 AS y
+
+        def test_comparison_op(self):
+            def test_(pdf: pd.DataFrame, op: str):
+                df = self.to_df(pdf)
+                df["d"] = self.utils.comparison_op(pdf.a, pdf.b, op)
+                df["e"] = self.utils.comparison_op(pdf.a, 2.0, op)
+                df["f"] = self.utils.comparison_op(2.0, pdf.b, op)
+                df["g"] = self.utils.comparison_op(2.0, 3.0, op)
+                df["h"] = self.utils.comparison_op(2.0, pdf.c, op)
+                df["i"] = self.utils.comparison_op(pdf.a, pdf.c, op)
+
+                assert_duck_eq(
+                    self.to_pd(df[list("defghi")]),
+                    f"""
+                    SELECT
+                        a{op}b AS d, a{op}2.0 AS e, 2.0{op}b AS f,
+                        2.0{op}3.0 AS g, 2.0{op}c AS h, a{op}c AS i
+                    FROM pdf
+                    """,
+                    pdf=pdf,
+                    check_order=False,
+                )
+
+            pdf = pd.DataFrame(
+                dict(
+                    a=[1.0, 2.0, 3.0, 4.0],
+                    b=[2.0, 2.0, 0.1, 2.0],
+                    c=[2.0, None, 2.0, float("nan")],
+                )
+            )
+            test_(pdf, "<")
+            test_(pdf, "<=")
+            test_(pdf, "==")
+            test_(pdf, "!=")
+            test_(pdf, ">")
+            test_(pdf, ">=")
+
+        def test_binary_logical_op(self):
+            def test_(pdf: pd.DataFrame, op: str):
+                df = self.to_df(pdf)
+                df["d"] = self.utils.binary_logical_op(pdf.a, pdf.b, op)
+                df["e"] = self.utils.binary_logical_op(pdf.a, True, op)
+                df["f"] = self.utils.binary_logical_op(True, pdf.b, op)
+                df["g"] = self.utils.binary_logical_op(pdf.a, False, op)
+                df["h"] = self.utils.binary_logical_op(False, pdf.b, op)
+                df["i"] = self.utils.binary_logical_op(True, False, op)
+                df["j"] = self.utils.binary_logical_op(True, None, op)
+                df["k"] = self.utils.binary_logical_op(False, None, op)
+                df["l"] = self.utils.binary_logical_op(None, None, op)
+
+                assert_duck_eq(
+                    self.to_pd(df[list("defghijkl")]),
+                    f"""
+                    SELECT
+                        a {op} b AS d, a {op} TRUE AS e, TRUE {op} b AS f,
+                        a {op} FALSE AS g, FALSE {op} b AS h, TRUE {op} FALSE AS i,
+                        TRUE {op} NULL AS j, FALSE {op} NULL AS k, NULL {op} NULL AS l
+                    FROM pdf
+                    """,
+                    pdf=pdf,
+                    check_order=False,
+                )
+
+            pdf = pd.DataFrame(
+                dict(
+                    a=[True, False, True, False, True, False, None],
+                    b=[False, True, True, False, None, None, None],
+                )
+            )
+            test_(pdf, "and")
+            test_(pdf, "or")
+
         def test_cols_to_df(self):
             df = self.to_df([["a", 1]], "a:str,b:long")
             res = self.utils.cols_to_df([df["b"], df["a"]])

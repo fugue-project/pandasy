@@ -56,6 +56,81 @@ def parse_join_type(join_type: str) -> str:
 class SlideUtils(Generic[TDF, TCol]):
     """A collection of utils for general pandas like dataframes"""
 
+    def is_series(self, obj: Any) -> bool:  # pragma: no cover
+        raise NotImplementedError
+
+    def unary_arithmetic_op(self, col: Any, op: str) -> Any:
+        """Unary arithmetic operator on series/constants
+
+        :param col: a series or a constant
+        :param op: can be ``+`` or ``-``
+        :raises NotImplementedError: if ``op`` is not supported
+        :return: the transformed series or constant
+        """
+        if op == "+":
+            return col
+        if op == "-":
+            return 0 - col
+        raise NotImplementedError(f"{op} is not supported")  # pragma: no cover
+
+    def binary_arithmetic_op(self, col1: Any, col2: Any, op: str) -> Any:
+        if op == "+":
+            return col1 + col2
+        if op == "-":
+            return col1 - col2
+        if op == "*":
+            return col1 * col2
+        if op == "/":
+            return col1 / col2
+        raise NotImplementedError(f"{op} is not supported")  # pragma: no cover
+
+    def comparison_op(self, col1: Any, col2: Any, op: str) -> Any:
+        if op == "==":
+            s: Any = col1 == col2
+        elif op == "!=":
+            s = col1 != col2
+        elif op == "<":
+            s = col1 < col2
+        elif op == "<=":
+            s = col1 <= col2
+        elif op == ">":
+            s = col1 > col2
+        elif op == ">=":
+            s = col1 >= col2
+        else:  # pragma: no cover
+            raise NotImplementedError(f"{op} is not supported")
+        return self._set_op_result_to_none(s, col1, col2)
+
+    def binary_logical_op(self, col1: Any, col2: Any, op: str) -> Any:
+        c1 = self._safe_bool(col1)
+        c2 = self._safe_bool(col2)
+        if op == "and":
+            s: Any = c1 * c2
+            # in sql, FALSE AND anything is False
+            if self.is_series(s):
+                s = s.mask((c1 == 0) | (c2 == 0), 0)
+            elif (c1 == 0) | (c2 == 0):
+                s = 0.0
+        elif op == "or":
+            s = c1 + c2
+            # in sql, True OR anything is True
+            if self.is_series(s):
+                s = s.mask((c1 > 0) | (c2 > 0), 1)
+            elif (c1 > 0) | (c2 > 0):
+                s = 1.0
+        else:  # pragma: no cover
+            raise NotImplementedError(f"{op} is not supported")
+        return s
+
+    def logical_not(self, col: Any) -> Any:
+        s = self._safe_bool(col)
+        if self.is_series(s):
+            nulls = s.isnull()
+            s = s == 0
+            s = s.mask(nulls, None)
+            return s
+        return 1.0 - s
+
     def cols_to_df(self, cols: List[TCol], names: Optional[List[str]] = None) -> TDF:
         """Construct the dataframe from a list of columns (serieses)
 
@@ -425,6 +500,24 @@ class SlideUtils(Generic[TDF, TCol]):
         else:  # pragma: no cover
             raise NotImplementedError(join_type)
         return joined
+
+    def _set_op_result_to_none(self, series: Any, s1: Any, s2: Any) -> Any:
+        if not self.is_series(series):
+            if s1 is None or s2 is None:
+                return None
+            return series
+        if self.is_series(s1):
+            series = series.mask(s1.isnull(), None)
+        if self.is_series(s2):
+            series = series.mask(s2.isnull(), None)
+        return series
+
+    def _safe_bool(self, col: Any) -> Any:
+        if self.is_series(col):
+            return col.astype("f8")
+        if col is None:
+            return float("nan")
+        return float(col > 0)
 
     def _preprocess_set_op(self, ndf1: TDF, ndf2: TDF) -> Tuple[TDF, TDF]:
         assert_or_throw(

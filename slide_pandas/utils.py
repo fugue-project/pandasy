@@ -12,12 +12,15 @@ _DEFAULT_DATETIME = datetime(2000, 1, 1)
 class PandasUtils(SlideUtils[pd.DataFrame, pd.Series]):
     """A collection of pandas utils"""
 
+    def is_series(self, obj: Any) -> bool:
+        return isinstance(obj, pd.Series)
+
     def cols_to_df(
         self, cols: List[pd.Series], names: Optional[List[str]] = None
     ) -> pd.DataFrame:
         if names is None:
             return pd.DataFrame({c.name: c for c in cols})
-        return pd.DataFrame({name: c for name, c in zip(names, cols)})
+        return pd.DataFrame(dict(zip(names, cols)))
 
     def sql_groupby_apply(
         self,
