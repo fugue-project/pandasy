@@ -185,6 +185,25 @@ class SlideUtils(Generic[TDf, TCol]):
             return s
         return 1.0 - s
 
+    def filter_df(self, df: TDf, cond: Any) -> TDf:
+        """Filter dataframe by a boolean series or a constant
+
+        :param df: the dataframe
+        :param cond: a boolean seris or a constant
+        :return: the filtered dataframe
+
+        .. note:
+
+        Filtering behavior should be consistent with SQL.
+        """
+        c = self._safe_bool(cond)
+        if self.is_series(c):
+            return df[c > 0]
+        elif c > 0:
+            return df
+        else:
+            return df.head(0)
+
     def cols_to_df(self, cols: List[TCol], names: Optional[List[str]] = None) -> TDf:
         """Construct the dataframe from a list of columns (serieses)
 

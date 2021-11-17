@@ -215,6 +215,42 @@ class SlideTestSuite(object):
             pdf = pd.DataFrame(dict(a=[True, False, None]))
             test_(pdf)
 
+        def test_filter_df(self):
+            def test_(pdf: pd.DataFrame):
+                df = self.to_df(pdf)
+                assert_duck_eq(
+                    self.to_pd(self.utils.filter_df(df, df["a"])),
+                    """
+                    SELECT * FROM pdf WHERE a
+                    """,
+                    pdf=pdf,
+                    check_order=False,
+                )
+
+            test_(pd.DataFrame(dict(a=[True, False], b=[1.0, 2.0])))
+            test_(pd.DataFrame(dict(a=[False, False], b=[1.0, 2.0])))
+            test_(pd.DataFrame(dict(a=[1.0, 0.0, None], b=[1.0, 2.0, 3.0])))
+            test_(pd.DataFrame(dict(a=[float("nan"), 0.0, None], b=[1.0, 2.0, 3.0])))
+
+            pdf = pd.DataFrame([[1], [2]], columns=["a"])
+            df = self.to_df(pdf)
+            assert_duck_eq(
+                self.to_pd(self.utils.filter_df(df, True)),
+                """
+                SELECT * FROM pdf WHERE TRUE
+                """,
+                pdf=pdf,
+                check_order=False,
+            )
+            assert_duck_eq(
+                self.to_pd(self.utils.filter_df(df, False)),
+                """
+                SELECT * FROM pdf WHERE FALSE
+                """,
+                pdf=pdf,
+                check_order=False,
+            )
+
         def test_cols_to_df(self):
             df = self.to_df([["a", 1]], "a:str,b:long")
             res = self.utils.cols_to_df([df["b"], df["a"]])
