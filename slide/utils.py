@@ -16,7 +16,7 @@ import pyarrow as pa
 from triad.utils.assertion import assert_or_throw
 from triad.utils.pyarrow import TRIAD_DEFAULT_TIMESTAMP, apply_schema, to_pandas_dtype
 
-TDF = TypeVar("TDF", bound=Any)
+TDf = TypeVar("TDf", bound=Any)
 TCol = TypeVar("TCol", bound=Any)
 _ANTI_INDICATOR = "__anti_indicator__"
 _CROSS_INDICATOR = "__corss_indicator__"
@@ -53,10 +53,15 @@ def parse_join_type(join_type: str) -> str:
     raise NotImplementedError(join_type)
 
 
-class SlideUtils(Generic[TDF, TCol]):
+class SlideUtils(Generic[TDf, TCol]):
     """A collection of utils for general pandas like dataframes"""
 
     def is_series(self, obj: Any) -> bool:  # pragma: no cover
+        """Check whether is a series type
+
+        :param obj: the object
+        :return: whether it is a series
+        """
         raise NotImplementedError
 
     def unary_arithmetic_op(self, col: Any, op: str) -> Any:
@@ -64,8 +69,12 @@ class SlideUtils(Generic[TDF, TCol]):
 
         :param col: a series or a constant
         :param op: can be ``+`` or ``-``
-        :raises NotImplementedError: if ``op`` is not supported
         :return: the transformed series or constant
+        :raises NotImplementedError: if ``op`` is not supported
+
+        .. note:
+
+        All behaviors should be consistent with SQL correspondent operations.
         """
         if op == "+":
             return col
@@ -74,6 +83,18 @@ class SlideUtils(Generic[TDF, TCol]):
         raise NotImplementedError(f"{op} is not supported")  # pragma: no cover
 
     def binary_arithmetic_op(self, col1: Any, col2: Any, op: str) -> Any:
+        """Binary arithmetic operations ``+``, ``-``, ``*``, ``/``
+
+        :param col1: the first column (series or constant)
+        :param col2: the second column (series or constant)
+        :param op: ``+``, ``-``, ``*``, ``/``
+        :return: the result after the operation (series or constant)
+        :raises NotImplementedError: if ``op`` is not supported
+
+        .. note:
+
+        All behaviors should be consistent with SQL correspondent operations.
+        """
         if op == "+":
             return col1 + col2
         if op == "-":
@@ -85,6 +106,19 @@ class SlideUtils(Generic[TDF, TCol]):
         raise NotImplementedError(f"{op} is not supported")  # pragma: no cover
 
     def comparison_op(self, col1: Any, col2: Any, op: str) -> Any:
+        """Binary comparison ``<``, ``<=``, ``==``, ``>``, ``>=``
+
+        :param col1: the first column (series or constant)
+        :param col2: the second column (series or constant)
+        :param op: ``<``, ``<=``, ``==``, ``>``, ``>=``
+        :return: the result after the operation (series or constant)
+        :raises NotImplementedError: if ``op`` is not supported
+
+        .. note:
+
+        All behaviors should be consistent with SQL correspondent operations.
+        """
+
         if col1 is None and col2 is None:
             return None
         if op == "==":
@@ -104,6 +138,18 @@ class SlideUtils(Generic[TDF, TCol]):
         return self._set_op_result_to_none(s, col1, col2)
 
     def binary_logical_op(self, col1: Any, col2: Any, op: str) -> Any:
+        """Binary logical operations ``and``, ``or``
+
+        :param col1: the first column (series or constant)
+        :param col2: the second column (series or constant)
+        :param op: ``and``, ``or``
+        :return: the result after the operation (series or constant)
+        :raises NotImplementedError: if ``op`` is not supported
+
+        .. note:
+
+        All behaviors should be consistent with SQL correspondent operations.
+        """
         c1 = self._safe_bool(col1)
         c2 = self._safe_bool(col2)
         if op == "and":
@@ -125,6 +171,12 @@ class SlideUtils(Generic[TDF, TCol]):
         return s
 
     def logical_not(self, col: Any) -> Any:
+        """Logical ``NOT``
+
+        .. note:
+
+        All behaviors should be consistent with SQL correspondent operations.
+        """
         s = self._safe_bool(col)
         if self.is_series(s):
             nulls = s.isnull()
@@ -133,7 +185,7 @@ class SlideUtils(Generic[TDF, TCol]):
             return s
         return 1.0 - s
 
-    def cols_to_df(self, cols: List[TCol], names: Optional[List[str]] = None) -> TDF:
+    def cols_to_df(self, cols: List[TCol], names: Optional[List[str]] = None) -> TDf:
         """Construct the dataframe from a list of columns (serieses)
 
         :param cols: the collection of columns
@@ -149,7 +201,7 @@ class SlideUtils(Generic[TDF, TCol]):
         """
         raise NotImplementedError  # pragma: no cover
 
-    def empty(self, df: TDF) -> bool:
+    def empty(self, df: TDf) -> bool:
         """Check if the dataframe is empty
 
         :param df: pandas like dataframe
@@ -157,7 +209,7 @@ class SlideUtils(Generic[TDF, TCol]):
         """
         return len(df.index) == 0
 
-    def as_arrow(self, df: TDF, schema: Optional[pa.Schema] = None) -> pa.Table:
+    def as_arrow(self, df: TDf, schema: Optional[pa.Schema] = None) -> pa.Table:
         """Convert pandas like dataframe to pyarrow table
 
         :param df: pandas like dataframe
@@ -169,7 +221,7 @@ class SlideUtils(Generic[TDF, TCol]):
 
     def as_array_iterable(
         self,
-        df: TDF,
+        df: TDf,
         schema: Optional[pa.Schema] = None,
         columns: Optional[List[str]] = None,
         type_safe: bool = False,
@@ -217,7 +269,7 @@ class SlideUtils(Generic[TDF, TCol]):
 
     def as_array(
         self,
-        df: TDF,
+        df: TDf,
         schema: Optional[pa.Schema] = None,
         columns: Optional[List[str]] = None,
         type_safe: bool = False,
@@ -228,7 +280,7 @@ class SlideUtils(Generic[TDF, TCol]):
             )
         )
 
-    def to_schema(self, df: TDF) -> pa.Schema:
+    def to_schema(self, df: TDf) -> pa.Schema:
         """Extract pandas dataframe schema as pyarrow schema. This is a replacement
         of pyarrow.Schema.from_pandas, and it can correctly handle string type and
         empty dataframes
@@ -269,8 +321,8 @@ class SlideUtils(Generic[TDF, TCol]):
         return pa.schema(fields)
 
     def enforce_type(  # noqa: C901
-        self, df: TDF, schema: pa.Schema, null_safe: bool = False
-    ) -> TDF:
+        self, df: TDf, schema: pa.Schema, null_safe: bool = False
+    ) -> TDf:
         """Enforce the pandas like dataframe to comply with `schema`.
 
         :param df: pandas like dataframe
@@ -316,11 +368,11 @@ class SlideUtils(Generic[TDF, TCol]):
 
     def sql_groupby_apply(
         self,
-        df: TDF,
+        df: TDf,
         cols: List[str],
-        func: Callable[[TDF], TDF],
+        func: Callable[[TDf], TDf],
         **kwargs: Any,
-    ) -> TDF:
+    ) -> TDf:
         """Safe groupby apply operation on pandas like dataframes.
         In pandas like groupby apply, if any key is null, the whole group is dropped.
         This method makes sure those groups are included.
@@ -337,7 +389,7 @@ class SlideUtils(Generic[TDF, TCol]):
         """
         raise NotImplementedError  # pragma: no cover
 
-    def is_compatile_index(self, df: TDF) -> bool:
+    def is_compatile_index(self, df: TDf) -> bool:
         """Check whether the datafame is compatible with the operations inside
         this utils collection
 
@@ -346,7 +398,7 @@ class SlideUtils(Generic[TDF, TCol]):
         """
         return isinstance(df.index, (pd.RangeIndex, pd.Int64Index, pd.UInt64Index))
 
-    def ensure_compatible(self, df: TDF) -> None:
+    def ensure_compatible(self, df: TDf) -> None:
         """Check whether the datafame is compatible with the operations inside
         this utils collection, if not, it will raise ValueError
 
@@ -363,7 +415,7 @@ class SlideUtils(Generic[TDF, TCol]):
             f"pandas like datafame must have default index, but got {type(df.index)}"
         )
 
-    def drop_duplicates(self, df: TDF) -> TDF:
+    def drop_duplicates(self, df: TDf) -> TDf:
         """Select distinct rows from dataframe
 
         :param df: the dataframe
@@ -371,7 +423,7 @@ class SlideUtils(Generic[TDF, TCol]):
         """
         return df.drop_duplicates(ignore_index=True)
 
-    def union(self, df1: TDF, df2: TDF, unique: bool) -> TDF:
+    def union(self, df1: TDf, df2: TDf, unique: bool) -> TDf:
         """Union two dataframes
 
         :param df1: the first dataframe
@@ -385,7 +437,7 @@ class SlideUtils(Generic[TDF, TCol]):
             ndf = self.drop_duplicates(ndf)
         return ndf
 
-    def intersect(self, df1: TDF, df2: TDF, unique: bool) -> TDF:
+    def intersect(self, df1: TDf, df2: TDf, unique: bool) -> TDf:
         """Intersect two dataframes
 
         :param ndf1: the first dataframe
@@ -401,11 +453,11 @@ class SlideUtils(Generic[TDF, TCol]):
 
     def except_df(
         self,
-        df1: TDF,
-        df2: TDF,
+        df1: TDf,
+        df2: TDf,
         unique: bool,
         anti_indicator_col: str = _ANTI_INDICATOR,
-    ) -> TDF:
+    ) -> TDf:
         """Exclude df2 from df1
 
         :param df1: the first dataframe
@@ -427,13 +479,13 @@ class SlideUtils(Generic[TDF, TCol]):
 
     def join(
         self,
-        ndf1: TDF,
-        ndf2: TDF,
+        ndf1: TDf,
+        ndf2: TDf,
         join_type: str,
         on: List[str],
         anti_indicator_col: str = _ANTI_INDICATOR,
         cross_indicator_col: str = _CROSS_INDICATOR,
-    ) -> TDF:
+    ) -> TDf:
         """Join two dataframes.
 
         :param ndf1: the first dataframe
@@ -519,7 +571,7 @@ class SlideUtils(Generic[TDF, TCol]):
             return float("nan")
         return float(col > 0)
 
-    def _preprocess_set_op(self, ndf1: TDF, ndf2: TDF) -> Tuple[TDF, TDF]:
+    def _preprocess_set_op(self, ndf1: TDf, ndf2: TDf) -> Tuple[TDf, TDf]:
         assert_or_throw(
             len(list(ndf1.columns)) == len(list(ndf2.columns)),
             ValueError("two dataframes have different number of columns"),
@@ -533,5 +585,5 @@ class SlideUtils(Generic[TDF, TCol]):
             return ndf1, ndf2
         return ndf1, self.cols_to_df(cols, list(ndf1.columns))
 
-    def _with_indicator(self, df: TDF, name: str) -> TDF:
+    def _with_indicator(self, df: TDf, name: str) -> TDf:
         return df.assign(**{name: 1})
