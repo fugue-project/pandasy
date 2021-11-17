@@ -85,6 +85,8 @@ class SlideUtils(Generic[TDF, TCol]):
         raise NotImplementedError(f"{op} is not supported")  # pragma: no cover
 
     def comparison_op(self, col1: Any, col2: Any, op: str) -> Any:
+        if col1 is None and col2 is None:
+            return None
         if op == "==":
             s: Any = col1 == col2
         elif op == "!=":
@@ -503,8 +505,6 @@ class SlideUtils(Generic[TDF, TCol]):
 
     def _set_op_result_to_none(self, series: Any, s1: Any, s2: Any) -> Any:
         if not self.is_series(series):
-            if s1 is None or s2 is None:
-                return None
             return series
         if self.is_series(s1):
             series = series.mask(s1.isnull(), None)

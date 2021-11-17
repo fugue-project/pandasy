@@ -126,18 +126,22 @@ class SlideTestSuite(object):
                 df["g"] = self.utils.comparison_op(2.0, 3.0, op)
                 df["h"] = self.utils.comparison_op(2.0, pdf.c, op)
                 df["i"] = self.utils.comparison_op(pdf.a, pdf.c, op)
+                df["j"] = self.utils.comparison_op(pdf.c, pdf.c, op)
 
                 assert_duck_eq(
-                    self.to_pd(df[list("defghi")]),
+                    self.to_pd(df[list("defghij")]),
                     f"""
                     SELECT
                         a{op}b AS d, a{op}2.0 AS e, 2.0{op}b AS f,
-                        2.0{op}3.0 AS g, 2.0{op}c AS h, a{op}c AS i
+                        2.0{op}3.0 AS g, 2.0{op}c AS h, a{op}c AS i,
+                        c{op}c AS j
                     FROM pdf
                     """,
                     pdf=pdf,
                     check_order=False,
                 )
+
+                assert self.utils.comparison_op(None, None, op) is None
 
             pdf = pd.DataFrame(
                 dict(
@@ -187,6 +191,29 @@ class SlideTestSuite(object):
             )
             test_(pdf, "and")
             test_(pdf, "or")
+
+        def test_logical_not(self):
+            def test_(pdf: pd.DataFrame):
+                df = self.to_df(pdf)
+                df["c"] = self.utils.logical_not(pdf.a)
+                df["e"] = self.utils.logical_not(True)
+                df["f"] = self.utils.logical_not(False)
+                df["g"] = self.utils.logical_not(None)
+
+                assert_duck_eq(
+                    self.to_pd(df[list("cefg")]),
+                    """
+                    SELECT
+                        NOT a AS c, NOT TRUE AS e,
+                        NOT FALSE AS f, NOT NULL AS g
+                    FROM pdf
+                    """,
+                    pdf=pdf,
+                    check_order=False,
+                )
+
+            pdf = pd.DataFrame(dict(a=[True, False, None]))
+            test_(pdf)
 
         def test_cols_to_df(self):
             df = self.to_df([["a", 1]], "a:str,b:long")
