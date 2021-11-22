@@ -13,8 +13,14 @@ from typing import (
 import numpy as np
 import pandas as pd
 import pyarrow as pa
+from slide.exceptions import SlideCastException
 from triad.utils.assertion import assert_or_throw
-from triad.utils.pyarrow import TRIAD_DEFAULT_TIMESTAMP, apply_schema, to_pandas_dtype
+from triad.utils.pyarrow import (
+    TRIAD_DEFAULT_TIMESTAMP,
+    apply_schema,
+    to_pa_datatype,
+    to_pandas_dtype,
+)
 
 TDf = TypeVar("TDf", bound=Any)
 TCol = TypeVar("TCol", bound=Any)
@@ -63,6 +69,19 @@ class SlideUtils(Generic[TDf, TCol]):
         :return: whether it is a series
         """
         raise NotImplementedError
+
+    def get_col_pa_type(self, col: Any) -> pa.DataType:
+        """Get column or constant pyarrow data type
+
+        :param col: the column or the constant
+        :return: pyarrow data type
+        """
+        if self.is_series(col):
+            tp = col.dtype
+            if tp == np.dtype("object") or tp == np.dtype(str):
+                return pa.string()
+            return pa.from_numpy_dtype(tp)
+        return to_pa_datatype(type(col))
 
     def unary_arithmetic_op(self, col: Any, op: str) -> Any:
         """Unary arithmetic operator on series/constants
@@ -184,6 +203,90 @@ class SlideUtils(Generic[TDf, TCol]):
             s = s.mask(nulls, None)
             return s
         return 1.0 - s
+
+    def cast(  # noqa: C901
+        self, col: Any, type_obj: Any, input_type: Any = None
+    ) -> Any:
+        """Cast ``col`` to a new type. ``type_obj`` must be
+        able to be converted by :func:`~triad.utils.pyarrow.to_pa_datatype`.
+
+        :param col: a series or a constant
+        :param type_obj: an objected that can be accepted by
+            :func:`~triad.utils.pyarrow.to_pa_datatype`
+        :param input_type: an objected that is either None or to be accepted by
+            :func:`~triad.utils.pyarrow.to_pa_datatype`, defaults to None.
+        :return: the new column or constant
+
+        .. note:
+
+        If ``input_type`` is not None, then it can be used to determine
+        the casting behavior. This can be useful when the input is boolean with
+        nulls or strings, where the pandas dtype may not provide the accurate
+        type information.
+        """
+        to_type = to_pa_datatype(type_obj)
+        p_type = to_type.to_pandas_dtype()
+        try:
+            if self.is_series(col):
+                try:
+                    from_type = (
+                        self.get_col_pa_type(col)
+                        if input_type is None
+                        else to_pa_datatype(input_type)
+                    )
+                    if from_type == to_type:
+                        return col
+                except Exception:
+                    return col.astype(p_type)
+                if pa.types.is_boolean(from_type):
+                    if pa.types.is_string(to_type):
+                        nulls = col.isnull()
+                        neg = col == 0
+                        pos = col != 0
+                        res = col.astype(str)
+                        return (
+                            res.mask(neg, "false").mask(pos, "true").mask(nulls, None)
+                        )
+                    if pa.types.is_integer(to_type) or pa.types.is_floating(to_type):
+                        nulls = col.isnull()
+                        return (col.fillna(0) != 0).astype(p_type).mask(nulls, None)
+                if pa.types.is_integer(from_type):
+                    if pa.types.is_boolean(to_type):
+                        return col != 0
+                elif pa.types.is_floating(from_type):
+                    if pa.types.is_boolean(to_type):
+                        nulls = col.isnull()
+                        return (col != 0).mask(nulls, None)
+                    if pa.types.is_integer(to_type):
+                        nulls = col.isnull()
+                        return col.fillna(0).astype(p_type).mask(nulls, None)
+                elif pa.types.is_string(from_type):
+                    if pa.types.is_boolean(to_type):
+                        lower = col.str.lower()
+                        res = lower.isin(["true", "1", "1.0"])
+                        nulls = (~res) & (~lower.isin(["false", "0", "0.0"]))
+                        return res.mask(nulls, None)
+                    if pa.types.is_integer(to_type):
+                        nulls = col.isnull()
+                        return (
+                            col.fillna(0)
+                            .astype(np.float64)
+                            .astype(p_type)
+                            .mask(nulls, None)
+                        )
+                elif pa.types.is_integer(to_type):
+                    nulls = col.isnull()
+                    return (
+                        col.fillna(0)
+                        .astype(np.float64)
+                        .astype(p_type)
+                        .mask(nulls, None)
+                    )
+                return col.astype(p_type)
+            else:
+                return np.array([col]).astype(p_type)[0]
+        except (TypeError, ValueError) as te:
+            raise SlideCastException(f"failed to cast to {p_type}") from te
 
     def filter_df(self, df: TDf, cond: Any) -> TDf:
         """Filter dataframe by a boolean series or a constant
