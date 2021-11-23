@@ -25,10 +25,6 @@ def assert_duck_eq(
     finally:
         conn.close()
 
-    if debug:
-        print(df)
-        print(df2)
-
     return assert_pdf_eq(
         df,
         df2,
@@ -37,6 +33,7 @@ def assert_duck_eq(
         check_order=check_order,
         check_content=check_content,
         throw=throw,
+        debug=debug,
     )
 
 
@@ -49,6 +46,7 @@ def assert_pdf_eq(
     check_order: bool = False,
     check_content: bool = True,
     throw=True,
+    debug: bool = False,
 ) -> bool:
     df1 = df
     df2 = (
@@ -74,6 +72,13 @@ def assert_pdf_eq(
             df2 = df2.sort_values(cols)
         df1 = df1.reset_index(drop=True)
         df2 = df2.reset_index(drop=True)
+
+        if debug:
+            print(df.dtypes)
+            print(df)
+            print(df2.dtypes)
+            print(df2)
+
         pd.testing.assert_frame_equal(
             df1, df2, check_less_precise=digits, check_dtype=False
         )

@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 from pytest import raises
+from slide.exceptions import SlideCastException
 from slide.utils import SlideUtils
 from slide_test.utils import assert_duck_eq, assert_pdf_eq, make_rand_df
 from triad import Schema
@@ -48,11 +49,6 @@ class SlideTestSuite(object):
             enforce_type: bool = True,
             null_safe: bool = False,
         ):
-            # if isinstance(columns , str):
-            # s = expression_to_schema(columns)
-            # df = pd.DataFrame(data, columns=s.names)
-            # self.native = PD_UTILS.null_safe(df, s, enforce)
-
             raise NotImplementedError
 
         def test_is_series(self):
@@ -61,6 +57,19 @@ class SlideTestSuite(object):
             assert not self.utils.is_series(None)
             assert not self.utils.is_series(1)
             assert not self.utils.is_series("abc")
+
+        def test_to_series(self):
+            s1 = self.utils.to_series(pd.Series([0, 1], name="x"))
+            s2 = self.utils.to_series(pd.Series([2, 3], name="x"), "y")
+            s3 = self.utils.to_series([4, 5], "z")
+            assert self.utils.is_series(s1)
+            assert self.utils.is_series(s2)
+            assert self.utils.is_series(s3)
+
+            df = self.utils.cols_to_df([s1, s2, s3])
+            assert_pdf_eq(
+                self.to_pd(df), pd.DataFrame(dict(x=[0, 1], y=[2, 3], z=[4, 5]))
+            )
 
         def test_get_col_pa_type(self):
             df = self.to_df(
@@ -132,7 +141,7 @@ class SlideTestSuite(object):
             # on different SQL engines. So we can't unify.
             # SELECT 1.0/0.0 AS x, 1/2 AS y
 
-        def test_comparison_op(self):
+        def test_comparison_op_num(self):
             def test_(pdf: pd.DataFrame, op: str):
                 df = self.to_df(pdf)
                 df["d"] = self.utils.comparison_op(pdf.a, pdf.b, op)
@@ -163,6 +172,87 @@ class SlideTestSuite(object):
                     a=[1.0, 2.0, 3.0, 4.0],
                     b=[2.0, 2.0, 0.1, 2.0],
                     c=[2.0, None, 2.0, float("nan")],
+                )
+            )
+            test_(pdf, "<")
+            test_(pdf, "<=")
+            test_(pdf, "==")
+            test_(pdf, "!=")
+            test_(pdf, ">")
+            test_(pdf, ">=")
+
+        def test_comparison_op_str(self):
+            def test_(pdf: pd.DataFrame, op: str):
+                df = self.to_df(pdf)
+                df["d"] = self.utils.comparison_op(pdf.a, pdf.b, op)
+                df["e"] = self.utils.comparison_op(pdf.a, "y", op)
+                df["f"] = self.utils.comparison_op("y", pdf.b, op)
+                df["g"] = self.utils.comparison_op("y", "z", op)
+                df["h"] = self.utils.comparison_op("y", pdf.c, op)
+                df["i"] = self.utils.comparison_op(pdf.a, pdf.c, op)
+                df["j"] = self.utils.comparison_op(pdf.c, pdf.c, op)
+
+                assert_duck_eq(
+                    self.to_pd(df[list("defghij")]),
+                    f"""
+                    SELECT
+                        a{op}b AS d, a{op}'y' AS e, 'y'{op}b AS f,
+                        'y'{op}'z' AS g, 'y'{op}c AS h, a{op}c AS i,
+                        c{op}c AS j
+                    FROM pdf
+                    """,
+                    pdf=pdf,
+                    check_order=False,
+                )
+
+            pdf = pd.DataFrame(
+                dict(
+                    a=["xx", None, "x"],
+                    b=[None, "t", "tt"],
+                    c=["zz", None, "z"],
+                )
+            )
+            test_(pdf, "<")
+            test_(pdf, "<=")
+            test_(pdf, "==")
+            test_(pdf, "!=")
+            test_(pdf, ">")
+            test_(pdf, ">=")
+
+        def test_comparison_op_time(self):
+            t = datetime(2019, 1, 1)
+            x = datetime(2020, 1, 1)
+            y = datetime(2020, 1, 2)
+            z = datetime(2020, 1, 3)
+
+            def test_(pdf: pd.DataFrame, op: str):
+                df = self.to_df(pdf)
+                df["d"] = self.utils.comparison_op(pdf.a, pdf.b, op)
+                df["e"] = self.utils.comparison_op(pdf.a, y, op)
+                df["f"] = self.utils.comparison_op(y, pdf.b, op)
+                df["g"] = self.utils.comparison_op(y, z, op)
+                df["h"] = self.utils.comparison_op(y, pdf.c, op)
+                df["i"] = self.utils.comparison_op(pdf.a, pdf.c, op)
+                df["j"] = self.utils.comparison_op(pdf.c, pdf.c, op)
+
+                assert_duck_eq(
+                    self.to_pd(df[list("defghij")]),
+                    f"""
+                    SELECT
+                        a{op}b AS d, a{op}'{y}' AS e, '{y}'{op}b AS f,
+                        '{y}'{op}'{z}' AS g, '{y}'{op}c AS h, a{op}c AS i,
+                        c{op}c AS j
+                    FROM pdf
+                    """,
+                    pdf=pdf,
+                    check_order=False,
+                )
+
+            pdf = pd.DataFrame(
+                dict(
+                    a=[x, None, x],
+                    b=[None, t, t],
+                    c=[z, z, None],
                 )
             )
             test_(pdf, "<")
@@ -266,7 +356,94 @@ class SlideTestSuite(object):
                 check_order=False,
             )
 
+        def test_cast_constant(self):
+            assert self.utils.cast(None, bool) is None
+            assert self.utils.cast(True, bool)
+            assert not self.utils.cast(False, bool)
+            assert self.utils.cast(float("nan"), bool) is None
+            assert not self.utils.cast(0, bool)
+            assert 1 == self.utils.cast(1, bool)
+            assert 1 == self.utils.cast(-2, bool)
+            assert 0 == self.utils.cast(0.0, bool)
+            assert 1 == self.utils.cast(0.1, bool)
+            assert 1 == self.utils.cast(-0.2, bool)
+            assert 1 == self.utils.cast(float("inf"), bool)
+            assert 1 == self.utils.cast(float("-inf"), bool)
+            assert self.utils.cast("nan", bool) is None
+            assert 1 == self.utils.cast("tRue", bool)
+            assert 0 == self.utils.cast("fAlse", bool)
+
+            assert self.utils.cast(None, int) is None
+            assert 1 == self.utils.cast(True, int)
+            assert 0 == self.utils.cast(False, int)
+            assert self.utils.cast(float("nan"), int) is None
+            assert 0 == self.utils.cast(0, int)
+            assert 10 == self.utils.cast(10, int)
+            assert 0 == self.utils.cast(0.0, int)
+            assert 1 == self.utils.cast(1.1, int)
+            assert -2 == self.utils.cast(-2.2, int)
+            assert 0 == self.utils.cast("0", int)
+            assert 10 == self.utils.cast("10", int)
+            assert 0 == self.utils.cast("0.0", int)
+            assert 1 == self.utils.cast("1.1", int)
+            assert -2 == self.utils.cast("-2.2", int)
+            assert self.utils.cast("nan", int) is None
+            with raises(SlideCastException):
+                assert self.utils.cast(float("inf"), int)
+            with raises(SlideCastException):
+                assert self.utils.cast(float("-inf"), int)
+
+            assert self.utils.cast(None, float) is None
+            assert 1.0 == self.utils.cast(True, float)
+            assert 0.0 == self.utils.cast(False, float)
+            assert self.utils.cast(float("nan"), float) is None
+            assert 0.0 == self.utils.cast(0, float)
+            assert 10.0 == self.utils.cast(10, float)
+            assert 0.0 == self.utils.cast(0.0, float)
+            assert 1.1 == self.utils.cast(1.1, float)
+            assert -2.2 == self.utils.cast(-2.2, float)
+            assert 0.0 == self.utils.cast("0", float)
+            assert 10.0 == self.utils.cast("10", float)
+            assert 0.0 == self.utils.cast("0.0", float)
+            assert 1.1 == self.utils.cast("1.1", float)
+            assert -2.2 == self.utils.cast("-2.2", float)
+            assert self.utils.cast("nan", float) is None
+            assert np.isinf(self.utils.cast(float("inf"), float))
+            assert np.isinf(self.utils.cast(float("-inf"), float))
+
+            assert self.utils.cast(None, str) is None
+            assert "true" == self.utils.cast(True, str)
+            assert "false" == self.utils.cast(False, str)
+            assert "true" == self.utils.cast(-10, str, bool)
+            assert "false" == self.utils.cast(0, str, bool)
+            assert "10" == self.utils.cast(10, str)
+            assert "0" == self.utils.cast(0, str)
+            assert "10.0" == self.utils.cast(10.0, str)
+            assert "-10.0" == self.utils.cast(-10.0, str)
+            assert self.utils.cast(float("nan"), str) is None
+            assert "inf" == self.utils.cast(float("inf"), str)
+            assert "-inf" == self.utils.cast(float("-inf"), str)
+            assert "xy" == self.utils.cast("xy", str)
+            assert isinstance(self.utils.cast(date(2020, 1, 1), str), str)
+            assert "2020-01-01" == self.utils.cast(date(2020, 1, 1), str)
+            assert "2020-01-01 15:00:00" == self.utils.cast(
+                datetime(2020, 1, 1, 15), str
+            )
+            assert self.utils.cast(pd.NaT, str) is None
+
+            assert self.utils.cast(None, "date") is None
+            assert self.utils.cast(None, "datetime") is None
+            assert self.utils.cast("nat", "date") is None
+            assert self.utils.cast("nat", "datetime") is None
+            assert date(2020, 1, 1) == self.utils.cast("2020-01-01", "date")
+            assert date(2020, 1, 1) == self.utils.cast("2020-01-01 15:00:00", "date")
+            assert datetime(2020, 1, 1) == self.utils.cast("2020-01-01", "datetime")
+            assert datetime(2020, 1, 1, 15) == self.utils.cast(
+                "2020-01-01 15:00:00", "datetime"
+            )
+
         def test_cast_bool(self):
+            # happy path
             pdf = pd.DataFrame(
                 dict(
                     a=[True, False, True],
@@ -292,6 +469,7 @@ class SlideTestSuite(object):
                 check_order=False,
             )
 
+            # from bool with None
             pdf = pd.DataFrame(
                 dict(
                     a=[True, False, None],
@@ -317,6 +495,47 @@ class SlideTestSuite(object):
                 check_order=False,
             )
 
+            # from float with None
+            pdf = pd.DataFrame(
+                dict(
+                    a=[2.0, 0.0, -2.0, None, float("nan")],
+                )
+            )
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.cast(df.a, bool)
+
+            assert_pdf_eq(
+                self.to_pd(df[list("h")]),
+                pd.DataFrame(
+                    dict(
+                        h=[True, False, True, None, None],
+                    ),
+                ),
+                check_order=False,
+            )
+
+            # from int
+            pdf = pd.DataFrame(
+                dict(
+                    a=[2, 0, -2],
+                )
+            )
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.cast(df.a, bool)
+
+            assert_pdf_eq(
+                self.to_pd(df[list("h")]),
+                pd.DataFrame(
+                    dict(
+                        h=[True, False, True],
+                    ),
+                ),
+                check_order=False,
+            )
+
+            # from bool with None to various
             pdf = pd.DataFrame(
                 dict(
                     a=[1.0, 0.0, None],
@@ -367,6 +586,7 @@ class SlideTestSuite(object):
                 check_order=False,
             )
 
+            # from strings
             pdf = pd.DataFrame(
                 dict(
                     a=["tRue", "fAlse", "true"],
@@ -396,6 +616,7 @@ class SlideTestSuite(object):
             )
 
         def test_cast_int(self):
+            # happy path
             pdf = pd.DataFrame(
                 dict(
                     a=[True, False, True],
@@ -427,72 +648,385 @@ class SlideTestSuite(object):
                 check_order=False,
             )
 
-        def test_cast_num_num(self):
+            # from int with None
             pdf = pd.DataFrame(
                 dict(
-                    a=[True, False, True],
-                    b=[1, 2, 3],
-                    c=[1.1, 2.2, 3.3],
-                    #  d=[True, False, None],
-                    e=[-1, None, 2000000],
-                    f=[float("nan"), 0.0, 3.3],
+                    a=[2, 3, None],
                 )
             )
 
             df = self.to_df(pdf)
-            df["g"] = self.utils.cast(df.a, bool)
             df["h"] = self.utils.cast(df.a, int)
-            df["i"] = self.utils.cast(df.a, float)
-            df["j"] = self.utils.cast(df.b, bool)
-            df["k"] = self.utils.cast(df.b, int)
-            df["l"] = self.utils.cast(df.b, float)
-            df["m"] = self.utils.cast(df.c, bool)
-            df["n"] = self.utils.cast(df.c, int)
-            df["o"] = self.utils.cast(df.c, float)
 
-            assert_duck_eq(
-                self.to_pd(df[list("ghijklmno")]),
-                """
-                SELECT
-                    CAST(a AS BOOLEAN) AS g,
-                    CAST(a AS INT64) AS h,
-                    CAST(a AS DOUBLE) AS i,
-                    CAST(b AS BOOLEAN) AS j,
-                    CAST(b AS INT64) AS k,
-                    CAST(b AS DOUBLE) AS l,
-                    CAST(c AS BOOLEAN) AS m,
-                    CAST(c AS INT64) AS n,
-                    CAST(c AS DOUBLE) AS o
-                FROM pdf WHERE TRUE
-                """,
-                pdf=pdf,
+            assert_pdf_eq(
+                self.to_pd(df[list("h")]),
+                pd.DataFrame(
+                    dict(
+                        h=[2, 3, None],
+                    ),
+                ),
                 check_order=False,
-                debug=True,
+            )
+
+            # from float with None
+            pdf = pd.DataFrame(
+                dict(
+                    a=[2.1, float("nan"), None],
+                )
             )
 
             df = self.to_df(pdf)
-            df["j"] = self.utils.cast(df.e, bool)
-            df["k"] = self.utils.cast(df.e, int)
-            df["l"] = self.utils.cast(df.e, float)
-            df["m"] = self.utils.cast(df.f, bool)
-            df["n"] = self.utils.cast(df.f, int)
-            df["o"] = self.utils.cast(df.f, float)
+            df["h"] = self.utils.cast(df.a, int)
 
-            assert_duck_eq(
-                self.to_pd(df[list("jklmno")]),
-                """
-                SELECT
-                    CAST(e AS BOOLEAN) AS j,
-                    CAST(e AS INT64) AS k,
-                    CAST(e AS DOUBLE) AS l,
-                    CAST(f AS BOOLEAN) AS m,
-                    CAST(f AS INT64) AS n,
-                    CAST(f AS DOUBLE) AS o
-                FROM pdf WHERE TRUE
-                """,
-                pdf=pdf,
+            assert_pdf_eq(
+                self.to_pd(df[list("h")]),
+                pd.DataFrame(
+                    dict(
+                        h=[2, None, None],
+                    ),
+                ),
                 check_order=False,
-                debug=True,
+            )
+
+            pdf = pd.DataFrame(
+                dict(
+                    a=[2.1, float("inf"), None],
+                )
+            )
+
+            df = self.to_df(pdf)
+            with raises(SlideCastException):
+                df["h"] = self.utils.cast(df.a, int)
+
+            # from string with None
+            pdf = pd.DataFrame(
+                dict(
+                    a=["2.1", "naN", None],
+                )
+            )
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.cast(df.a, int)
+
+            assert_pdf_eq(
+                self.to_pd(df[list("h")]),
+                pd.DataFrame(
+                    dict(
+                        h=[2, None, None],
+                    ),
+                ),
+                check_order=False,
+            )
+
+            # overflow, TODO: pandas can't raise exception
+            pdf = pd.DataFrame(
+                dict(
+                    a=[10000, -10000],
+                )
+            )
+
+            # df = self.to_df(pdf)
+            # with raises(SlideCastException):
+            #    df["h"] = self.utils.cast(df.a, "int8")
+
+        def test_cast_float(self):
+            # happy path
+            pdf = pd.DataFrame(
+                dict(
+                    a=[True, False, True],
+                    b=[2, 3, 4],
+                    c=[1.1, 2.2, 3.3],
+                    d=[2.0, 0.0, -1.0],
+                    e=["5.5", "6.6", "7.7"],
+                )
+            )
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.cast(df.a, float)
+            df["i"] = self.utils.cast(df.b, float)
+            df["j"] = self.utils.cast(df.c, float)
+            df["k"] = self.utils.cast(df.d, float, bool)
+            df["l"] = self.utils.cast(df.e, float)
+
+            assert_pdf_eq(
+                self.to_pd(df[list("hijkl")]),
+                pd.DataFrame(
+                    dict(
+                        h=[1, 0, 1],
+                        i=[2, 3, 4],
+                        j=[1.1, 2.2, 3.3],
+                        k=[1.0, 0.0, 1.0],
+                        l=[5.5, 6.6, 7.7],
+                    ),
+                ),
+                check_order=False,
+            )
+
+            # from float with None
+            pdf = pd.DataFrame(
+                dict(
+                    a=[2.1, float("nan"), float("inf"), None],
+                )
+            )
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.cast(df.a, float)
+
+            assert_pdf_eq(
+                self.to_pd(df[list("h")]),
+                pd.DataFrame(
+                    dict(
+                        h=[2.1, float("nan"), float("inf"), None],
+                    ),
+                ),
+                check_order=False,
+            )
+
+            # from string with None
+            pdf = pd.DataFrame(
+                dict(
+                    a=["2.1", "naN", "inf", "-inf", None],
+                )
+            )
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.cast(df.a, float)
+
+            assert_pdf_eq(
+                self.to_pd(df[list("h")]),
+                pd.DataFrame(
+                    dict(
+                        h=[2.1, None, float("inf"), float("-inf"), None],
+                    ),
+                ),
+                check_order=False,
+            )
+
+        def test_cast_str(self):
+            # happy path
+            pdf = pd.DataFrame(
+                dict(
+                    a=[False, True, True],
+                    b=[2, 3, 4],
+                    c=[1.1, 2.2, 3.3],
+                    d=[
+                        datetime(2020, 1, 2),
+                        datetime(2020, 1, 3),
+                        datetime(2020, 1, 4),
+                    ],
+                    e=["aa", "ab", "ac"],
+                )
+            )
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.cast(df.a, str)
+            df["i"] = self.utils.cast(df.b, str)
+            df["j"] = self.utils.cast(df.c, str)
+            df["k"] = self.utils.cast(df.d, str)
+            df["l"] = self.utils.cast(df.e, str)
+
+            assert_pdf_eq(
+                self.to_pd(df[list("hijkl")]),
+                pd.DataFrame(
+                    dict(
+                        h=["false", "true", "true"],
+                        i=["2", "3", "4"],
+                        j=["1.1", "2.2", "3.3"],
+                        k=["2020-01-02", "2020-01-03", "2020-01-04"],
+                        l=["aa", "ab", "ac"],
+                    ),
+                ),
+                check_order=False,
+            )
+
+            # from bool with None
+            pdf = pd.DataFrame(
+                dict(
+                    a=[True, False, None],
+                )
+            )
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.cast(df.a, str, bool)
+
+            assert_pdf_eq(
+                self.to_pd(df[list("h")]),
+                pd.DataFrame(
+                    dict(
+                        h=["true", "false", None],
+                    ),
+                ),
+                check_order=False,
+            )
+
+            # from float with None
+            pdf = pd.DataFrame(
+                dict(
+                    a=[2.1, float("nan"), float("inf"), None],
+                )
+            )
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.cast(df.a, str)
+
+            assert_pdf_eq(
+                self.to_pd(df[list("h")]),
+                pd.DataFrame(
+                    dict(
+                        h=["2.1", None, "inf", None],
+                    ),
+                ),
+                check_order=False,
+            )
+
+            # from int with None
+            pdf = pd.DataFrame(
+                dict(
+                    a=[1, None],
+                )
+            )
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.cast(df.a, str, int)
+
+            assert_pdf_eq(
+                self.to_pd(df[list("h")]),
+                pd.DataFrame(
+                    dict(
+                        h=["1", None],
+                    ),
+                ),
+                check_order=False,
+            )
+
+            # from timestamp with None
+            pdf = pd.DataFrame(
+                dict(
+                    a=[
+                        datetime(2020, 1, 1),
+                        datetime(2020, 1, 1, 15, 2, 3),
+                        pd.NaT,
+                        None,
+                    ],
+                )
+            )
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.cast(df.a, str)
+
+            assert_pdf_eq(
+                self.to_pd(df[list("h")]),
+                pd.DataFrame(
+                    dict(
+                        h=["2020-01-01 00:00:00", "2020-01-01 15:02:03", None, None],
+                    ),
+                ),
+                check_order=False,
+            )
+
+            # from date with None
+            pdf = pd.DataFrame(
+                dict(
+                    a=[
+                        date(2020, 1, 1),
+                        date(2020, 1, 2),
+                        pd.NaT,
+                        None,
+                    ],
+                )
+            )
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.cast(df.a, str, "date")
+
+            assert_pdf_eq(
+                self.to_pd(df[list("h")]),
+                pd.DataFrame(
+                    dict(
+                        h=["2020-01-01", "2020-01-02", None, None],
+                    ),
+                ),
+                check_order=False,
+            )
+
+        def test_cast_time(self):
+            # happy path
+            pdf = pd.DataFrame(
+                dict(
+                    a=["2020-01-01", "2020-01-02", "2020-01-03"],
+                    b=[
+                        "2020-01-01 01:00:00",
+                        "2020-01-02 14:00:00",
+                        "2020-01-03 15:00:00",
+                    ],
+                )
+            )
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.cast(df.a, "date")
+            df["i"] = self.utils.cast(df.a, "datetime")
+            df["j"] = self.utils.cast(df.b, "date")
+            df["k"] = self.utils.cast(df.b, "datetime")
+
+            assert_pdf_eq(
+                self.to_pd(df[list("hijk")]),
+                pd.DataFrame(
+                    dict(
+                        h=[date(2020, 1, 1), date(2020, 1, 2), date(2020, 1, 3)],
+                        i=[
+                            datetime(2020, 1, 1),
+                            datetime(2020, 1, 2),
+                            datetime(2020, 1, 3),
+                        ],
+                        j=[date(2020, 1, 1), date(2020, 1, 2), date(2020, 1, 3)],
+                        k=[
+                            datetime(2020, 1, 1, 1),
+                            datetime(2020, 1, 2, 14),
+                            datetime(2020, 1, 3, 15),
+                        ],
+                    ),
+                ),
+                check_order=False,
+            )
+
+            # str -> date with None
+            pdf = pd.DataFrame(
+                dict(
+                    a=["2020-01-01", "2020-01-02", None],
+                )
+            )
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.cast(df.a, "date")
+
+            assert_pdf_eq(
+                self.to_pd(df[list("h")]),
+                pd.DataFrame(
+                    dict(
+                        h=[date(2020, 1, 1), date(2020, 1, 2), None],
+                    ),
+                ),
+                check_order=False,
+            )
+
+            # str -> datetime with None
+            pdf = pd.DataFrame(
+                dict(
+                    a=["2020-01-01 11:00:00", "2020-01-02 12:00:00", None],
+                )
+            )
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.cast(df.a, "datetime")
+
+            assert_pdf_eq(
+                self.to_pd(df[list("h")]),
+                pd.DataFrame(
+                    dict(
+                        h=[datetime(2020, 1, 1, 11), datetime(2020, 1, 2, 12), None],
+                    ),
+                ),
+                check_order=False,
             )
 
         def test_cols_to_df(self):

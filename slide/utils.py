@@ -70,6 +70,17 @@ class SlideUtils(Generic[TDf, TCol]):
         """
         raise NotImplementedError
 
+    def to_series(
+        self, obj: Any, name: Optional[str] = None
+    ) -> TCol:  # pragma: no cover
+        """Convert an object to series
+
+        :param obj: the object
+        :param name: name of the series, defaults to None.
+        :return: the series
+        """
+        raise NotImplementedError
+
     def get_col_pa_type(self, col: Any) -> pa.DataType:
         """Get column or constant pyarrow data type
 
@@ -225,9 +236,9 @@ class SlideUtils(Generic[TDf, TCol]):
         type information.
         """
         to_type = to_pa_datatype(type_obj)
-        p_type = to_type.to_pandas_dtype()
-        try:
-            if self.is_series(col):
+        p_type = str if pa.types.is_string(to_type) else to_type.to_pandas_dtype()
+        if self.is_series(col):
+            try:
                 try:
                     from_type = (
                         self.get_col_pa_type(col)
@@ -236,7 +247,7 @@ class SlideUtils(Generic[TDf, TCol]):
                     )
                     if from_type == to_type:
                         return col
-                except Exception:
+                except Exception:  # pragma: no cover
                     return col.astype(p_type)
                 if pa.types.is_boolean(from_type):
                     if pa.types.is_string(to_type):
@@ -253,11 +264,23 @@ class SlideUtils(Generic[TDf, TCol]):
                 if pa.types.is_integer(from_type):
                     if pa.types.is_boolean(to_type):
                         return col != 0
+                    if pa.types.is_string(to_type):
+                        temp = col.astype(np.float64)
+                        nulls = temp.isnull()
+                        return (
+                            temp.fillna(0)
+                            .astype(np.int64)
+                            .astype(p_type)
+                            .mask(nulls, None)
+                        )
                 elif pa.types.is_floating(from_type):
                     if pa.types.is_boolean(to_type):
                         nulls = col.isnull()
                         return (col != 0).mask(nulls, None)
                     if pa.types.is_integer(to_type):
+                        nulls = col.isnull()
+                        return col.fillna(0).astype(p_type).mask(nulls, None)
+                    if pa.types.is_string(to_type):
                         nulls = col.isnull()
                         return col.fillna(0).astype(p_type).mask(nulls, None)
                 elif pa.types.is_string(from_type):
@@ -267,26 +290,29 @@ class SlideUtils(Generic[TDf, TCol]):
                         nulls = (~res) & (~lower.isin(["false", "0", "0.0"]))
                         return res.mask(nulls, None)
                     if pa.types.is_integer(to_type):
+                        temp = col.astype(np.float64)
+                        nulls = temp.isnull()
+                        return temp.fillna(0).astype(p_type).mask(nulls, None)
+                elif pa.types.is_timestamp(from_type) or pa.types.is_date(from_type):
+                    if pa.types.is_string(to_type):
                         nulls = col.isnull()
-                        return (
-                            col.fillna(0)
-                            .astype(np.float64)
-                            .astype(p_type)
-                            .mask(nulls, None)
-                        )
-                elif pa.types.is_integer(to_type):
-                    nulls = col.isnull()
-                    return (
-                        col.fillna(0)
-                        .astype(np.float64)
-                        .astype(p_type)
-                        .mask(nulls, None)
-                    )
+                        return col.astype(p_type).mask(nulls, None)
                 return col.astype(p_type)
-            else:
-                return np.array([col]).astype(p_type)[0]
-        except (TypeError, ValueError) as te:
-            raise SlideCastException(f"failed to cast to {p_type}") from te
+            except (TypeError, ValueError) as te:
+                raise SlideCastException(f"failed to cast to {p_type}") from te
+        else:
+            if col is None:
+                return None
+            res = self.cast(
+                self.to_series([col]),
+                type_obj=type_obj,
+                input_type=self.get_col_pa_type(col)
+                if input_type is None
+                else input_type,
+            ).iloc[0]
+            if pd.isna(res):
+                return None
+            return res
 
     def filter_df(self, df: TDf, cond: Any) -> TDf:
         """Filter dataframe by a boolean series or a constant

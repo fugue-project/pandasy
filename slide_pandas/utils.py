@@ -15,6 +15,15 @@ class PandasUtils(SlideUtils[pd.DataFrame, pd.Series]):
     def is_series(self, obj: Any) -> bool:
         return isinstance(obj, pd.Series)
 
+    def to_series(self, obj: Any, name: Optional[str] = None) -> pd.Series:
+        if self.is_series(obj):
+            if name is not None and obj.name != name:
+                return obj.rename(name)
+            return obj
+        if isinstance(obj, (np.ndarray, list)):
+            return pd.Series(obj, name=name)
+        raise NotImplementedError  # pragma: no cover
+
     def cols_to_df(
         self, cols: List[pd.Series], names: Optional[List[str]] = None
     ) -> pd.DataFrame:
