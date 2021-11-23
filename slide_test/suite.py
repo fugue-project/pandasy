@@ -356,6 +356,79 @@ class SlideTestSuite(object):
                 check_order=False,
             )
 
+        def test_is_value(self):
+            assert self.utils.is_value(None, None, True)
+            assert not self.utils.is_value(None, None, False)
+            assert not self.utils.is_value(None, True, True)
+            assert self.utils.is_value(None, True, False)
+            assert not self.utils.is_value(None, False, True)
+            assert self.utils.is_value(None, False, False)
+
+            assert self.utils.is_value(float("nan"), None, True)
+            assert not self.utils.is_value(float("nan"), None, False)
+
+            assert self.utils.is_value(pd.NaT, None, True)
+            assert not self.utils.is_value(pd.NaT, None, False)
+
+            assert not self.utils.is_value("abc", None, True)
+            assert self.utils.is_value("abc", None, False)
+
+            assert not self.utils.is_value(True, None, True)
+            assert self.utils.is_value(True, None, False)
+            assert self.utils.is_value(True, True, True)
+            assert not self.utils.is_value(True, True, False)
+            assert not self.utils.is_value(True, False, True)
+            assert self.utils.is_value(True, False, False)
+
+            assert not self.utils.is_value(-1.1, None, True)
+            assert self.utils.is_value(-1.1, None, False)
+            assert self.utils.is_value(-1.1, True, True)
+            assert not self.utils.is_value(-1.1, True, False)
+            assert not self.utils.is_value(-1.1, False, True)
+            assert self.utils.is_value(-1.1, False, False)
+
+            assert not self.utils.is_value(False, None, True)
+            assert self.utils.is_value(False, None, False)
+            assert not self.utils.is_value(False, True, True)
+            assert self.utils.is_value(False, True, False)
+            assert self.utils.is_value(False, False, True)
+            assert not self.utils.is_value(False, False, False)
+
+            assert not self.utils.is_value(0, None, True)
+            assert self.utils.is_value(0, None, False)
+            assert not self.utils.is_value(0, True, True)
+            assert self.utils.is_value(0, True, False)
+            assert self.utils.is_value(0, False, True)
+            assert not self.utils.is_value(0, False, False)
+
+            with raises(NotImplementedError):
+                self.utils.is_value(0, "x", False)
+
+            pdf = pd.DataFrame(dict(a=[True, False, None]))
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.is_value(df["a"], None, True)
+            df["i"] = self.utils.is_value(df["a"], None, False)
+            df["j"] = self.utils.is_value(df["a"], True, True)
+            df["k"] = self.utils.is_value(df["a"], True, False)
+            df["l"] = self.utils.is_value(df["a"], False, True)
+            df["m"] = self.utils.is_value(df["a"], False, False)
+
+            assert_pdf_eq(
+                self.to_pd(df[list("hijklm")]),
+                pd.DataFrame(
+                    dict(
+                        h=[False, False, True],
+                        i=[True, True, False],
+                        j=[True, False, False],
+                        k=[False, True, True],
+                        l=[False, True, False],
+                        m=[True, False, True],
+                    ),
+                ),
+                check_order=False,
+            )
+
         def test_cast_constant(self):
             assert self.utils.cast(None, bool) is None
             assert self.utils.cast(True, bool)

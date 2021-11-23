@@ -333,6 +333,38 @@ class SlideUtils(Generic[TDf, TCol]):
         else:
             return df.head(0)
 
+    def is_value(self, col: Any, value: Any, positive: bool = True) -> Any:
+        """Check if the series or constant is ``value``
+
+        :param col: the series or constant
+        :param value: ``None``, ``True`` or ``False``
+        :param positive: check ``is value`` or ``is not value``,
+            defaults to True (``is value``)
+        :raises NotImplementedError: if value is not supported
+        :return: a bool value or a series
+        """
+        if self.is_series(col):
+            if value is None:
+                if positive:
+                    return col.isnull()
+                else:
+                    return ~col.isnull()
+            elif isinstance(value, bool) and value:
+                if positive:
+                    return (col != 0) & (~col.isnull())
+                else:
+                    return (col == 0) | col.isnull()
+            elif isinstance(value, bool) and not value:
+                if positive:
+                    return (col == 0) & (~col.isnull())
+                else:
+                    return (col != 0) | col.isnull()
+            raise NotImplementedError(value)
+        else:
+            return self.is_value(
+                self.to_series([col]), value=value, positive=positive
+            ).iloc[0]
+
     def cols_to_df(self, cols: List[TCol], names: Optional[List[str]] = None) -> TDf:
         """Construct the dataframe from a list of columns (serieses)
 
