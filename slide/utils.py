@@ -365,6 +365,53 @@ class SlideUtils(Generic[TDf, TCol]):
                 self.to_series([col]), value=value, positive=positive
             ).iloc[0]
 
+    def is_in(self, col: Any, values: List[Any], positive: bool) -> Any:  # noqa: C901
+        """Check if a series or a constant is in ``values``
+
+        :param col: the series or the constant
+        :param values: a list of constants and serieses (can mix)
+        :param positive: ``is in`` or ``is not in``
+        :return: the correspondent boolean series or constant
+
+        .. note:
+
+        This behavior should be consistent with SQL ``IN`` and ``NOT IN``.
+        The return values can be ``True``, ``False`` and ``None``
+        """
+        if self.is_series(col):
+            cols = [x for x in values if self.is_series(x)]
+            others = [x for x in values if not self.is_series(x)]
+            has_null_constant = any(pd.isna(x) for x in others)
+            innulls: Any = None
+            if positive:
+                o: Any = col.isin(others)
+                for c in cols:
+                    o = o | (col == c)
+                    if not has_null_constant:
+                        if innulls is None:
+                            innulls = c.isnull()
+                        else:
+                            innulls = innulls | c.isnull()
+            else:
+                o = ~col.isin(others)
+                for c in cols:
+                    o = o & (col != c)
+                    if not has_null_constant:
+                        if innulls is None:
+                            innulls = c.isnull()
+                        else:
+                            innulls = innulls | c.isnull()
+            if has_null_constant:
+                o = o.mask(o == (0 if positive else 1), None)
+            elif innulls is not None:
+                o = o.mask(innulls & (o == (0 if positive else 1)), None)
+            return o.mask(col.isnull(), None)
+        else:
+            res = self.is_in(
+                self.to_series([col]), values=values, positive=positive
+            ).iloc[0]
+            return None if pd.isna(res) else bool(res)
+
     def cols_to_df(self, cols: List[TCol], names: Optional[List[str]] = None) -> TDf:
         """Construct the dataframe from a list of columns (serieses)
 

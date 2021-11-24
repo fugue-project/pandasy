@@ -429,6 +429,145 @@ class SlideTestSuite(object):
                 check_order=False,
             )
 
+        def test_is_in(self):
+            assert self.utils.is_in(None, [None, 1], True) is None
+            assert self.utils.is_in(None, [None, 1], False) is None
+            assert self.utils.is_in(None, ["a", "b"], True) is None
+            assert self.utils.is_in(None, ["a", "b"], False) is None
+
+            assert self.utils.is_in(True, [False, True], True)
+            assert not self.utils.is_in(True, [False, True], False)
+            assert self.utils.is_in(False, [None, False], True)
+            assert not self.utils.is_in(False, [None, False], False)
+
+            assert self.utils.is_in(True, [None, False], True) is None
+            assert self.utils.is_in(True, [None, False], False) is None
+
+            assert self.utils.is_in(1, [2, 1], True)
+            assert not self.utils.is_in(1, [2, 1], False)
+            assert self.utils.is_in(1, [None, 1], True)
+            assert not self.utils.is_in(1, [None, 1], False)
+
+            assert self.utils.is_in(1, [None, 2], True) is None
+            assert self.utils.is_in(1, [None, 2], False) is None
+
+            assert self.utils.is_in(1.1, [2.2, 1.1], True)
+            assert not self.utils.is_in(1.1, [2.2, 1.1], False)
+            assert self.utils.is_in(1.1, [None, 1.1], True)
+            assert not self.utils.is_in(1.1, [None, 1.1], False)
+
+            assert self.utils.is_in(1.1, [None, 2.2], True) is None
+            assert self.utils.is_in(1.1, [None, 2.2], False) is None
+
+            assert self.utils.is_in("aa", ["bb", "aa"], True)
+            assert not self.utils.is_in("aa", ["bb", "aa"], False)
+            assert self.utils.is_in("aa", [None, "aa"], True)
+            assert not self.utils.is_in("aa", [None, "aa"], False)
+
+            assert self.utils.is_in("aa", [None, "bb"], True) is None
+            assert self.utils.is_in("aa", [None, "b"], False) is None
+
+            assert self.utils.is_in(
+                date(2020, 1, 1), [date(2020, 1, 2), date(2020, 1, 1)], True
+            )
+            assert not self.utils.is_in(
+                date(2020, 1, 1), [date(2020, 1, 2), date(2020, 1, 1)], False
+            )
+            assert self.utils.is_in(date(2020, 1, 1), [pd.NaT, date(2020, 1, 1)], True)
+            assert not self.utils.is_in(
+                date(2020, 1, 1), [None, date(2020, 1, 1)], False
+            )
+
+            assert (
+                self.utils.is_in(date(2020, 1, 1), [pd.NaT, date(2020, 1, 2)], True)
+                is None
+            )
+            assert (
+                self.utils.is_in(date(2020, 1, 1), [None, date(2020, 1, 2)], False)
+                is None
+            )
+
+        def test_is_in_sql(self):
+            pdf = pd.DataFrame(
+                dict(
+                    a=[True, False, None],
+                    b=[1, 2, None],
+                    c=[1.1, 2.2, None],
+                    d=["aa", "bb", None],
+                    e=[date(2020, 1, 1), date(2020, 1, 2), None],
+                )
+            )
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.is_in(df["a"], [False, None], True)
+            df["i"] = self.utils.is_in(df["a"], [False, None], False)
+            df["j"] = self.utils.is_in(df["b"], [1, 3, None], True)
+            df["k"] = self.utils.is_in(df["b"], [1, 3, None], False)
+            df["l"] = self.utils.is_in(df["c"], [1.1, 3.3, None], True)
+            df["m"] = self.utils.is_in(df["c"], [1.1, 3.3, None], False)
+            df["n"] = self.utils.is_in(df["d"], ["aa", "cc", None], True)
+            df["o"] = self.utils.is_in(df["d"], ["aa", "cc", None], False)
+            df["p"] = self.utils.is_in(
+                df["e"], [date(2020, 1, 1), date(2020, 1, 3), None], True
+            )
+            df["q"] = self.utils.is_in(
+                df["e"], [date(2020, 1, 1), date(2020, 1, 3), None], False
+            )
+
+            assert_duck_eq(
+                self.to_pd(df[list("jklmnopq")]),
+                """
+                SELECT
+                    -- a IN (FALSE, NULL) AS h,
+                    -- a NOT IN (FALSE, NULL) AS i,
+                    b IN (3, 1, NULL) AS j,
+                    b NOT IN (3, 1, NULL) AS k,
+                    c IN (3.3, 1.1, NULL) AS l,
+                    c NOT IN (3.3, 1.1, NULL) AS m,
+                    d IN ('cc', 'aa', NULL) AS n,
+                    d NOT IN ('cc', 'aa', NULL) AS o,
+                    e IN ('2020-01-03', '2020-01-01', NULL) AS p,
+                    e NOT IN ('2020-01-03', '2020-01-01', NULL) AS q
+                FROM a
+                """,
+                a=pdf,
+                check_order=False,
+            )
+
+            pdf = pd.DataFrame(
+                dict(
+                    a=[1.1, 2.2, None],
+                    b=[1.1, None, None],
+                    c=[None, 2.2, None],
+                    d=[3.3, None, None],
+                    e=[None, 4.4, None],
+                )
+            )
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.is_in(df["a"], [df["b"], df["c"]], True)
+            df["i"] = self.utils.is_in(df["a"], [df["b"], df["c"]], False)
+            df["j"] = self.utils.is_in(df["a"], [df["d"], df["e"]], True)
+            df["k"] = self.utils.is_in(df["a"], [df["d"], df["e"]], False)
+            df["l"] = self.utils.is_in(df["a"], [df["b"], df["d"], None], True)
+            df["m"] = self.utils.is_in(df["a"], [df["b"], df["d"], None], False)
+
+            assert_duck_eq(
+                self.to_pd(df[list("hijklm")]),
+                """
+                SELECT
+                    a IN (b, c) AS h,
+                    a NOT IN (b, c) AS i,
+                    a IN (d, e) AS j,
+                    a NOT IN (d, e) AS k,
+                    a IN (b, d, NULL) AS l,
+                    a NOT IN (b, d, NULL) AS m
+                FROM a
+                """,
+                a=pdf,
+                check_order=False,
+            )
+
         def test_cast_constant(self):
             assert self.utils.cast(None, bool) is None
             assert self.utils.cast(True, bool)
