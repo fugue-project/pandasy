@@ -71,6 +71,16 @@ class SlideTestSuite(object):
                 self.to_pd(df), pd.DataFrame(dict(x=[0, 1], y=[2, 3], z=[4, 5]))
             )
 
+        def test_to_constant_series(self):
+            s = self.utils.to_series(pd.Series([0, 1], name="x"))
+            s1 = self.utils.to_constant_series("a", s, name="y")
+            s2 = self.utils.to_constant_series(None, s, name="z", dtype="float64")
+            df = self.utils.cols_to_df([s, s1, s2])
+            assert_pdf_eq(
+                self.to_pd(df),
+                pd.DataFrame(dict(x=[0, 1], y=["a", "a"], z=[None, None])),
+            )
+
         def test_get_col_pa_type(self):
             df = self.to_df(
                 [["a", 1, 1.1, True, datetime.now()]],
@@ -566,6 +576,97 @@ class SlideTestSuite(object):
                 """,
                 a=pdf,
                 check_order=False,
+            )
+
+        def test_is_between(self):
+            # if col is null, then the result is null
+            for a in [1, 2, None]:
+                for b in [1, 2, None]:
+                    for p in [True, False]:
+                        assert self.utils.is_between(None, a, b, p) is None
+
+            # one side is none and the result can't be determined, so null
+            assert self.utils.is_between(2, None, 2, True) is None
+            assert self.utils.is_between(2, None, 2, False) is None
+            assert self.utils.is_between(3, 2, None, True) is None
+            assert self.utils.is_between(3, 2, None, False) is None
+
+            # one side is none but the result is still deterministic
+            assert not self.utils.is_between(3, None, 2, True)
+            assert self.utils.is_between(3, None, 2, False)
+            assert not self.utils.is_between(1, 2, None, True)
+            assert self.utils.is_between(1, 2, None, False)
+
+            # if lower and upper are both nulls, the result is null
+            assert self.utils.is_between(3, None, None, True) is None
+            assert self.utils.is_between(3, None, None, False) is None
+
+            # happy paths
+            assert self.utils.is_between(1, 1, 2, True)
+            assert not self.utils.is_between(2, 1, 2, False)
+            assert not self.utils.is_between(0, 1, 2, True)
+            assert self.utils.is_between(0, 1, 2, False)
+            assert not self.utils.is_between(3, 1, 2, True)
+            assert self.utils.is_between(3, 1, 2, False)
+
+            assert self.utils.is_between("bb", "bb", "cc", True)
+            assert not self.utils.is_between("cc", "bb", "cc", False)
+            assert not self.utils.is_between("aa", "bb", "cc", True)
+            assert self.utils.is_between("aa", "bb", "cc", False)
+
+            assert self.utils.is_between(
+                date(2020, 1, 2), date(2020, 1, 2), date(2020, 1, 3), True
+            )
+            assert not self.utils.is_between(
+                date(2020, 1, 3), date(2020, 1, 2), date(2020, 1, 3), False
+            )
+            assert not self.utils.is_between(
+                date(2020, 1, 1), date(2020, 1, 2), date(2020, 1, 3), True
+            )
+            assert self.utils.is_between(
+                date(2020, 1, 1), date(2020, 1, 2), date(2020, 1, 3), False
+            )
+
+        def test_is_between_sql(self):
+            # pdf = make_rand_df(100, a=(float, 20), b=(float, 20), c=(float, 20))
+            pdf = make_rand_df(5, a=(float, 2), b=(float, 2), c=(float, 2))
+            print(pdf)
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.is_between(df["a"], df["b"], df["c"], True)
+            df["i"] = self.utils.is_between(df["a"], df["b"], df["c"], False)
+            df["j"] = self.utils.is_between(None, df["b"], df["c"], True)
+            df["k"] = self.utils.is_between(None, df["b"], df["c"], False)
+            df["l"] = self.utils.is_between(df["a"], df["b"], None, True)
+            df["m"] = self.utils.is_between(df["a"], df["b"], None, False)
+            df["n"] = self.utils.is_between(df["a"], None, df["c"], True)
+            df["o"] = self.utils.is_between(df["a"], None, df["c"], False)
+            df["p"] = self.utils.is_between(df["a"], 0.5, df["c"], True)
+            df["q"] = self.utils.is_between(df["a"], 0.5, df["c"], False)
+            df["r"] = self.utils.is_between(df["a"], df["b"], 0.5, True)
+            df["s"] = self.utils.is_between(df["a"], df["b"], 0.5, False)
+
+            assert_duck_eq(
+                self.to_pd(df[list("hijklmnopqrs")]),
+                """
+                SELECT
+                    a BETWEEN b AND c AS h,
+                    a NOT BETWEEN b AND c AS i,
+                    NULL BETWEEN b AND c AS j,
+                    NULL NOT BETWEEN b AND c AS k,
+                    a BETWEEN b AND NULL AS l,
+                    a NOT BETWEEN b AND NULL AS m,
+                    a BETWEEN NULL AND c AS n,
+                    a NOT BETWEEN NULL AND c AS o,
+                    a BETWEEN 0.5 AND c AS p,
+                    a NOT BETWEEN 0.5 AND c AS q,
+                    a BETWEEN b AND 0.5 AS r,
+                    a NOT BETWEEN b AND 0.5 AS s
+                FROM a
+                """,
+                a=pdf,
+                check_order=True,
+                debug=True,
             )
 
         def test_cast_constant(self):

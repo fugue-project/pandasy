@@ -24,6 +24,15 @@ class PandasUtils(SlideUtils[pd.DataFrame, pd.Series]):
             return pd.Series(obj, name=name)
         raise NotImplementedError  # pragma: no cover
 
+    def to_constant_series(
+        self,
+        constant: Any,
+        from_series: pd.Series,
+        dtype: Any = None,
+        name: Optional[str] = None,
+    ) -> pd.Series:
+        return pd.Series(constant, index=from_series.index, dtype=dtype, name=name)
+
     def cols_to_df(
         self, cols: List[pd.Series], names: Optional[List[str]] = None
     ) -> pd.DataFrame:

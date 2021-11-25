@@ -76,7 +76,24 @@ class SlideUtils(Generic[TDf, TCol]):
         """Convert an object to series
 
         :param obj: the object
-        :param name: name of the series, defaults to None.
+        :param name: name of the series, defaults to None
+        :return: the series
+        """
+        raise NotImplementedError
+
+    def to_constant_series(
+        self,
+        constant: Any,
+        from_series: TCol,
+        dtype: Any = None,
+        name: Optional[str] = None,
+    ) -> TCol:  # pragma: no cover
+        """Convert a constant to a series with the same index of ``from_series``
+
+        :param constant: the constant
+        :param from_series: the reference series for index
+        :param dtype: default data type, defaults to None
+        :param name: name of the series, defaults to None
         :return: the series
         """
         raise NotImplementedError
@@ -409,6 +426,44 @@ class SlideUtils(Generic[TDf, TCol]):
         else:
             res = self.is_in(
                 self.to_series([col]), values=values, positive=positive
+            ).iloc[0]
+            return None if pd.isna(res) else bool(res)
+
+    def is_between(self, col: Any, lower: Any, upper: Any, positive: bool) -> Any:
+        """Check if a series or a constant is ``>=lower`` and ``<=upper``
+
+        :param col: the series or the constant
+        :param lower: the lower bound, which can be series or a constant
+        :param upper: the upper bound, which can be series or a constant
+        :param positive: ``is between`` or ``is not between``
+        :return: the correspondent boolean series or constant
+
+        .. note:
+
+        This behavior should be consistent with SQL ``BETWEEN`` and ``NOT BETWEEN``.
+        The return values can be ``True``, ``False`` and ``None``
+        """
+        if col is None:
+            return None
+        if self.is_series(col):
+            left = (lower <= col).fillna(False)
+            right = (col <= upper).fillna(False)
+            ln = lower.isnull() if self.is_series(lower) else lower is None
+            un = upper.isnull() if self.is_series(upper) else upper is None
+            s: Any = left & right
+            s = s.mask(col.isnull() | (ln & un), None)
+            if self.is_series(lower) or lower is None:
+                s = s.mask(right & ln, None)
+            if self.is_series(upper) or upper is None:
+                s = s.mask(left & un, None)
+
+            if positive:
+                return s
+            nulls = s.isnull()
+            return (~(s.fillna(False))).mask(nulls, None)
+        else:
+            res = self.is_between(
+                self.to_series([col]), lower=lower, upper=upper, positive=positive
             ).iloc[0]
             return None if pd.isna(res) else bool(res)
 
