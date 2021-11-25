@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 from pytest import raises
-from slide.exceptions import SlideCastException
+from slide.exceptions import SlideCastError, SlideInvalidOperation
 from slide.utils import SlideUtils
 from slide_test.utils import assert_duck_eq, assert_pdf_eq, make_rand_df
 from triad import Schema
@@ -628,8 +628,8 @@ class SlideTestSuite(object):
             )
 
         def test_is_between_sql(self):
-            # pdf = make_rand_df(100, a=(float, 20), b=(float, 20), c=(float, 20))
-            pdf = make_rand_df(5, a=(float, 2), b=(float, 2), c=(float, 2))
+            pdf = make_rand_df(100, a=(float, 20), b=(float, 20), c=(float, 20))
+            # pdf = make_rand_df(5, a=(float, 2), b=(float, 2), c=(float, 2))
             print(pdf)
 
             df = self.to_df(pdf)
@@ -665,8 +665,38 @@ class SlideTestSuite(object):
                 FROM a
                 """,
                 a=pdf,
-                check_order=True,
-                debug=True,
+                check_order=False,
+            )
+
+        def test_cast_coalesce_sql(self):
+            pdf = make_rand_df(100, a=(float, 50), b=(float, 50), c=(float, 50))
+
+            df = self.to_df(pdf)
+            df["g"] = self.utils.coalesce([None])
+            df["h"] = self.utils.coalesce([None, 10.1, None])
+            df["i"] = self.utils.coalesce([df["a"], 10.1])
+            df["j"] = self.utils.coalesce([10.1, df["a"]])
+            df["k"] = self.utils.coalesce([df["a"], None])
+            df["l"] = self.utils.coalesce([None, df["a"]])
+            df["m"] = self.utils.coalesce([df["a"], df["b"], df["c"]])
+            df["n"] = self.utils.coalesce([df["a"], df["b"], df["c"], 10.1])
+
+            assert_duck_eq(
+                self.to_pd(df[list("ghijklmn")]),
+                """
+                SELECT
+                    COALESCE(NULL) AS g,
+                    COALESCE(NULL, 10.1, NULL) AS h,
+                    COALESCE(a, 10.1) AS i,
+                    COALESCE(10.1, a) AS j,
+                    COALESCE(a, NULL) AS k,
+                    COALESCE(NULL, a) AS l,
+                    COALESCE(a,b,c) AS m,
+                    COALESCE(a,b,c,10.1) AS n
+                FROM a
+                """,
+                a=pdf,
+                check_order=False,
             )
 
         def test_cast_constant(self):
@@ -701,9 +731,9 @@ class SlideTestSuite(object):
             assert 1 == self.utils.cast("1.1", int)
             assert -2 == self.utils.cast("-2.2", int)
             assert self.utils.cast("nan", int) is None
-            with raises(SlideCastException):
+            with raises(SlideCastError):
                 assert self.utils.cast(float("inf"), int)
-            with raises(SlideCastException):
+            with raises(SlideCastError):
                 assert self.utils.cast(float("-inf"), int)
 
             assert self.utils.cast(None, float) is None
@@ -1008,7 +1038,7 @@ class SlideTestSuite(object):
             )
 
             df = self.to_df(pdf)
-            with raises(SlideCastException):
+            with raises(SlideCastError):
                 df["h"] = self.utils.cast(df.a, int)
 
             # from string with None
@@ -1039,7 +1069,7 @@ class SlideTestSuite(object):
             )
 
             # df = self.to_df(pdf)
-            # with raises(SlideCastException):
+            # with raises(SlideCastError):
             #    df["h"] = self.utils.cast(df.a, "int8")
 
         def test_cast_float(self):
@@ -1348,6 +1378,12 @@ class SlideTestSuite(object):
             assert_pdf_eq(res, self.to_pd(self.to_df([[1, "a"]], "b:long,a:str")))
             res = self.utils.cols_to_df([df["b"], df["a"]], ["x", "y"])
             assert_pdf_eq(res, self.to_pd(self.to_df([[1, "a"]], "x:long,y:str")))
+
+            res = self.utils.cols_to_df([123, df["a"]], names=["x", "y"])
+            assert_pdf_eq(res, self.to_pd(self.to_df([[123, "a"]], "x:long,y:str")))
+
+            with raises(SlideInvalidOperation):
+                res = self.utils.cols_to_df([123, 456], names=["x", "y"])
 
         def test_to_schema(self):
             df = self.to_df([[1.0, 2], [2.0, 3]])

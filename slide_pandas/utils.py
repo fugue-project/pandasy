@@ -3,7 +3,9 @@ from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
+from slide.exceptions import SlideInvalidOperation
 from slide.utils import SlideUtils
+from triad.utils.assertion import assert_or_throw
 
 _KEY_COL_NAME = "__safe_groupby_key__"
 _DEFAULT_DATETIME = datetime(2000, 1, 1)
@@ -36,6 +38,10 @@ class PandasUtils(SlideUtils[pd.DataFrame, pd.Series]):
     def cols_to_df(
         self, cols: List[pd.Series], names: Optional[List[str]] = None
     ) -> pd.DataFrame:
+        assert_or_throw(
+            any(self.is_series(s) for s in cols),
+            SlideInvalidOperation("at least one value in cols should be series"),
+        )
         if names is None:
             return pd.DataFrame({c.name: c for c in cols})
         return pd.DataFrame(dict(zip(names, cols)))

@@ -13,7 +13,7 @@ from typing import (
 import numpy as np
 import pandas as pd
 import pyarrow as pa
-from slide.exceptions import SlideCastException
+from slide.exceptions import SlideCastError
 from triad.utils.assertion import assert_or_throw
 from triad.utils.pyarrow import (
     TRIAD_DEFAULT_TIMESTAMP,
@@ -316,7 +316,7 @@ class SlideUtils(Generic[TDf, TCol]):
                         return col.astype(p_type).mask(nulls, None)
                 return col.astype(p_type)
             except (TypeError, ValueError) as te:
-                raise SlideCastException(f"failed to cast to {p_type}") from te
+                raise SlideCastError(f"failed to cast to {p_type}") from te
         else:
             if col is None:
                 return None
@@ -386,7 +386,7 @@ class SlideUtils(Generic[TDf, TCol]):
         """Check if a series or a constant is in ``values``
 
         :param col: the series or the constant
-        :param values: a list of constants and serieses (can mix)
+        :param values: a list of constants and series (can mix)
         :param positive: ``is in`` or ``is not in``
         :return: the correspondent boolean series or constant
 
@@ -467,10 +467,29 @@ class SlideUtils(Generic[TDf, TCol]):
             ).iloc[0]
             return None if pd.isna(res) else bool(res)
 
-    def cols_to_df(self, cols: List[TCol], names: Optional[List[str]] = None) -> TDf:
-        """Construct the dataframe from a list of columns (serieses)
+    def coalesce(self, cols: List[Any]) -> Any:
+        """Coalesce multiple series and constants
 
-        :param cols: the collection of columns
+        :param cols: the collection of series and constants in order
+        :return: the coalesced series or constant
+
+        .. note:
+
+        This behavior should be consistent with SQL ``COALESCE``
+        """
+        if any(self.is_series(s) for s in cols):
+            tmp = self.cols_to_df(cols, [f"_{n}" for n in range(len(cols))])
+            return tmp.fillna(method="bfill", axis=1)["_0"]
+        for x in cols:
+            if x is not None:
+                return x
+        return None
+
+    def cols_to_df(self, cols: List[Any], names: Optional[List[str]] = None) -> TDf:
+        """Construct the dataframe from a list of columns (series)
+
+        :param cols: the collection of series or constants, at least one value must
+            be a series
         :param names: the correspondent column names, defaults to None
 
         :return: the dataframe

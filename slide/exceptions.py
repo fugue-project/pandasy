@@ -4,7 +4,13 @@ class SlideException(Exception):
     pass
 
 
-class SlideCastException(SlideException):
+class SlideInvalidOperation(SlideException):
+    """Invalid operations"""
+
+    pass
+
+
+class SlideCastError(SlideException):
     """Type casting exception"""
 
     pass
