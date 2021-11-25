@@ -699,6 +699,127 @@ class SlideTestSuite(object):
                 check_order=False,
             )
 
+            pdf = make_rand_df(100, a=(bool, 50), b=(bool, 50), c=(bool, 50))
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.coalesce([None, False, None])
+            df["i"] = self.utils.coalesce([df["a"], False])
+            df["j"] = self.utils.coalesce([False, df["a"]])
+            df["k"] = self.utils.coalesce([df["a"], None])
+            df["l"] = self.utils.coalesce([None, df["a"]])
+            df["m"] = self.utils.coalesce([df["a"], df["b"], df["c"]])
+            df["n"] = self.utils.coalesce([df["a"], df["b"], df["c"], False])
+
+            assert_duck_eq(
+                self.to_pd(df[list("hijklmn")]),
+                """
+                SELECT
+                    COALESCE(NULL, FALSE) AS h,
+                    COALESCE(a, FALSE) AS i,
+                    COALESCE(FALSE, a) AS j,
+                    COALESCE(a, NULL) AS k,
+                    COALESCE(NULL, a) AS l,
+                    COALESCE(a,b,c) AS m,
+                    COALESCE(a,b,c,FALSE) AS n
+                FROM (SELECT
+                        CAST(a AS BOOLEAN) a,
+                        CAST(b AS BOOLEAN) b,
+                        CAST(c AS BOOLEAN) c FROM a)
+                """,
+                a=pdf,
+                check_order=False,
+            )
+
+            pdf = make_rand_df(100, a=(int, 50), b=(int, 50), c=(int, 50))
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.coalesce([None, 10, None])
+            df["i"] = self.utils.coalesce([df["a"], 10])
+            df["j"] = self.utils.coalesce([10, df["a"]])
+            df["k"] = self.utils.coalesce([df["a"], None])
+            df["l"] = self.utils.coalesce([None, df["a"]])
+            df["m"] = self.utils.coalesce([df["a"], df["b"], df["c"]])
+            df["n"] = self.utils.coalesce([df["a"], df["b"], df["c"], 10])
+
+            assert_duck_eq(
+                self.to_pd(df[list("hijklmn")]),
+                """
+                SELECT
+                    COALESCE(NULL, 10) AS h,
+                    COALESCE(a, 10) AS i,
+                    COALESCE(10, a) AS j,
+                    COALESCE(a, NULL) AS k,
+                    COALESCE(NULL, a) AS l,
+                    COALESCE(a,b,c) AS m,
+                    COALESCE(a,b,c,10) AS n
+                FROM (SELECT
+                        CAST(a AS INTEGER) a,
+                        CAST(b AS INTEGER) b,
+                        CAST(c AS INTEGER) c FROM a)
+                """,
+                a=pdf,
+                check_order=False,
+            )
+
+            pdf = make_rand_df(100, a=(str, 50), b=(str, 50), c=(str, 50))
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.coalesce([None, "xx", None])
+            df["i"] = self.utils.coalesce([df["a"], "xx"])
+            df["j"] = self.utils.coalesce(["xx", df["a"]])
+            df["k"] = self.utils.coalesce([df["a"], None])
+            df["l"] = self.utils.coalesce([None, df["a"]])
+            df["m"] = self.utils.coalesce([df["a"], df["b"], df["c"]])
+            df["n"] = self.utils.coalesce([df["a"], df["b"], df["c"], "xx"])
+
+            assert_duck_eq(
+                self.to_pd(df[list("hijklmn")]),
+                """
+                SELECT
+                    COALESCE(NULL, 'xx') AS h,
+                    COALESCE(a, 'xx') AS i,
+                    COALESCE('xx', a) AS j,
+                    COALESCE(a, NULL) AS k,
+                    COALESCE(NULL, a) AS l,
+                    COALESCE(a,b,c) AS m,
+                    COALESCE(a,b,c,'xx') AS n
+                FROM a
+                """,
+                a=pdf,
+                check_order=False,
+            )
+
+            pdf = make_rand_df(
+                100, a=(datetime, 50), b=(datetime, 50), c=(datetime, 50)
+            )
+
+            ct = datetime(2020, 1, 1, 15)
+            df = self.to_df(pdf)
+            df["h"] = self.utils.coalesce([None, ct, None])
+            df["i"] = self.utils.coalesce([df["a"], ct])
+            df["j"] = self.utils.coalesce([ct, df["a"]])
+            df["k"] = self.utils.coalesce([df["a"], None])
+            df["l"] = self.utils.coalesce([None, df["a"]])
+            df["m"] = self.utils.coalesce([df["a"], df["b"], df["c"]])
+            df["n"] = self.utils.coalesce([df["a"], df["b"], df["c"], ct])
+
+            assert_duck_eq(
+                self.to_pd(df[list("hijklmn")]),
+                """
+                SELECT
+                    COALESCE(NULL, TIMESTAMP '2020-01-01 15:00:00') AS h,
+                    COALESCE(a, TIMESTAMP '2020-01-01 15:00:00') AS i,
+                    COALESCE(TIMESTAMP '2020-01-01 15:00:00', a) AS j,
+                    COALESCE(a, NULL) AS k,
+                    COALESCE(NULL, a) AS l,
+                    COALESCE(a,b,c) AS m,
+                    COALESCE(a,b,c,TIMESTAMP '2020-01-01 15:00:00') AS n
+                FROM a
+                """,
+                a=pdf,
+                check_order=False,
+            )
+
         def test_cast_constant(self):
             assert self.utils.cast(None, bool) is None
             assert self.utils.cast(True, bool)
