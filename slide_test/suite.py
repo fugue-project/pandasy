@@ -820,6 +820,108 @@ class SlideTestSuite(object):
                 check_order=False,
             )
 
+        def test_case_when(self):
+            assert 4 == self.utils.case_when(default=4)
+            assert 3 == self.utils.case_when((False, 1), (2, 3), default=4)
+            assert 3 == self.utils.case_when((None, 1), (2, 3), default=4)
+            assert 1 == self.utils.case_when((True, 1), (2, 3), default=4)
+            assert 4 == self.utils.case_when((False, 1), (False, 3), default=4)
+
+        def test_case_when_sql(self):
+            pdf = make_rand_df(
+                20, a=(bool, 10), b=(str, 10), c=(bool, 10), d=(str, 10), e=(str, 10)
+            )
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.case_when((df["a"], df["b"]), (df["c"], df["d"]))
+            df["i"] = self.utils.case_when(
+                (df["a"], df["b"]), (df["c"], df["d"]), default=df["e"]
+            )
+
+            assert_duck_eq(
+                self.to_pd(df[list("hi")]),
+                """
+                SELECT
+                    CASE WHEN a THEN b WHEN c THEN d END AS h,
+                    CASE WHEN a THEN b WHEN c THEN d ELSE e END AS i
+                FROM a
+                """,
+                a=pdf,
+                check_order=False,
+            )
+
+            pdf = make_rand_df(
+                20,
+                a=(float, 10),
+                b=(float, 10),
+                c=(float, 10),
+                d=(float, 10),
+                e=(float, 10),
+            )
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.case_when(
+                (df["a"] > 0.5, df["b"]), ((df["c"] > 0.5) | (df["a"] > 0.3), df["d"])
+            )
+            df["i"] = self.utils.case_when(
+                (df["a"] > 0.5, df["b"]),
+                ((df["c"] > 0.5) | (df["a"] > 0.3), df["d"]),
+                default=df["e"],
+            )
+            df["j"] = self.utils.case_when(
+                (df["a"] > 0.5, df["b"]),
+                (df["a"] > 0.5, df["d"]),
+                default=df["e"],
+            )
+            df["k"] = self.utils.case_when(
+                (None, df["b"]),
+                (df["a"] > 0.5, df["d"]),
+                default=df["e"],
+            )
+            df["l"] = self.utils.case_when(
+                (True, 2),
+                (df["a"] > 0.5, df["d"]),
+                default=df["e"],
+            )
+            df["m"] = self.utils.case_when(
+                (True, None),
+                (df["a"] > 0.5, df["d"]),
+                default=df["e"],
+            )
+
+            assert_duck_eq(
+                self.to_pd(df[list("hijklm")]),
+                """
+                SELECT
+                    CASE
+                        WHEN a>0.5 THEN b
+                        WHEN c>0.5 OR a>0.3 THEN d END AS h,
+                    CASE
+                        WHEN a>0.5 THEN b
+                        WHEN c>0.5 OR a>0.3 THEN d
+                        ELSE e END AS i,
+                    CASE
+                        WHEN a>0.5 THEN b
+                        WHEN a>0.5 THEN d
+                        ELSE e END AS j,
+                    CASE
+                        WHEN NULL THEN b
+                        WHEN a>0.5 THEN d
+                        ELSE e END AS k,
+                    CASE
+                        WHEN TRUE THEN 2
+                        WHEN a>0.5 THEN d
+                        ELSE e END AS l,
+                    CASE
+                        WHEN TRUE THEN NULL
+                        WHEN a>0.5 THEN d
+                        ELSE e END AS m
+                FROM a
+                """,
+                a=pdf,
+                check_order=False,
+            )
+
         def test_like(self):
             # nulls
             for p in [True, False]:

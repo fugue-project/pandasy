@@ -485,6 +485,46 @@ class SlideUtils(Generic[TDf, TCol]):
                 return x
         return None
 
+    def case_when(self, *pairs: Tuple[Any, Any], default: Any = None) -> Any:
+        """SQL ``CASE WHEN``
+
+        :param pairs: condition and value pairs, both can be either a
+            series or a constant
+        :param default: default value if none of the conditions satisfies,
+            defaults to None
+        :return: the final series or constant
+
+        .. note:
+
+        This behavior should be consistent with SQL ``CASE WHEN``
+        """
+
+        def _safe_pos(s: Any) -> Any:
+            if self.is_series(s):
+                return (s > 0) | (s < 0)
+            return not pd.isna(s) and s != 0
+
+        def get_series() -> Iterable[Tuple[str, Any]]:
+            for n in range(len(pairs)):
+                yield f"w_{n}", _safe_pos(pairs[n][0])
+                yield f"t_{n}", pairs[n][1]
+            yield "d", default
+
+        all_series = list(get_series())
+        if any(self.is_series(x[1]) for x in all_series):
+            tmp = self.cols_to_df(
+                [x[1] for x in all_series], names=[x[0] for x in all_series]
+            )
+            res = tmp["d"]
+            for n in reversed(range(len(pairs))):
+                res = res.mask(tmp[f"w_{n}"], tmp[f"t_{n}"])
+            return res
+        sd = {x[0]: x[1] for x in all_series}
+        for n in range(len(pairs)):
+            if sd[f"w_{n}"] == 1.0:
+                return sd[f"t_{n}"]
+        return sd["d"]
+
     def like(  # noqa: C901
         self, col: Any, expr: Any, ignore_case: bool = False, positive: bool = True
     ) -> Any:
@@ -493,7 +533,7 @@ class SlideUtils(Generic[TDf, TCol]):
         :param col: a series or a constant
         :param expr: a pattern expression
         :param ignore_case: whether to ignore case, defaults to False
-        :param positive: ``LIKE`` or ``NOT LIKE``
+        :param positive: ``LIKE`` or ``NOT LIKE``, defaults to True
         :return: the correspondent boolean series or constant
 
         .. note:
