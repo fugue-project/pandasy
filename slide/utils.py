@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 from slide.exceptions import SlideCastError
+from slide._string_utils import LikeExpr, LikeExprShortcut
 from triad.utils.assertion import assert_or_throw
 from triad.utils.pyarrow import (
     TRIAD_DEFAULT_TIMESTAMP,
@@ -459,8 +460,7 @@ class SlideUtils(Generic[TDf, TCol]):
 
             if positive:
                 return s
-            nulls = s.isnull()
-            return (~(s.fillna(False))).mask(nulls, None)
+            return (s == 0).mask(s.isnull(), None)
         else:
             res = self.is_between(
                 self.to_series([col]), lower=lower, upper=upper, positive=positive
@@ -484,6 +484,77 @@ class SlideUtils(Generic[TDf, TCol]):
             if x is not None:
                 return x
         return None
+
+    def like(  # noqa: C901
+        self, col: Any, expr: Any, ignore_case: bool = False, positive: bool = True
+    ) -> Any:
+        """SQL ``LIKE``
+
+        :param col: a series or a constant
+        :param expr: a pattern expression
+        :param ignore_case: whether to ignore case, defaults to False
+        :param positive: ``LIKE`` or ``NOT LIKE``
+        :return: the correspondent boolean series or constant
+
+        .. note:
+
+        This behavior should be consistent with SQL ``LIKE``
+        """
+        assert_or_throw(
+            expr is None or isinstance(expr, str),
+            NotImplementedError("expr can only be a string"),
+        )
+
+        def like_series(col: TCol) -> TCol:
+            le = LikeExpr(expr)
+            if le.shortcut == LikeExprShortcut.EMPTY:
+                return col == ""
+            if le.shortcut == LikeExprShortcut.NOT_EMPTY:
+                return col != ""
+            if le.shortcut == LikeExprShortcut.SIMPLE:
+                if not ignore_case:
+                    return col == le.tokens[0][1]
+                else:
+                    return col.str.lower() == le.tokens[0][1].lower()
+            if le.shortcut == LikeExprShortcut.ANY:
+                return ~(col.isnull())
+            if le.shortcut == LikeExprShortcut.START:
+                if not ignore_case:
+                    return col.str.startswith(le.tokens[0][1])
+                return col.str.lower().str.startswith(le.tokens[0][1].lower())
+            if le.shortcut == LikeExprShortcut.END:
+                if not ignore_case:
+                    return col.str.endswith(le.tokens[1][1]).mask(nulls, None)
+                return col.str.lower().str.endswith(le.tokens[1][1].lower())
+            if le.shortcut == LikeExprShortcut.START_END:
+                if not ignore_case:
+                    return col.str.startswith(le.tokens[0][1]) & col.str.endswith(
+                        le.tokens[2][1]
+                    )
+                return col.str.lower().str.startswith(
+                    le.tokens[0][1].lower()
+                ) & col.str.lower().str.endswith(le.tokens[2][1].lower())
+            if le.shortcut == LikeExprShortcut.CONTAIN:
+                if not ignore_case:
+                    return col.str.contains(le.tokens[1][1])
+                return col.str.lower().str.contains(le.tokens[1][1].lower())
+            if le.shortcut == LikeExprShortcut.NA:
+                return col.str.match(le.re(), case=not ignore_case)
+            raise NotImplementedError(le.shortcut)  # pragma: no cover
+
+        if self.is_series(col):
+            if expr is None:
+                return self.to_constant_series(float("nan"), col)
+            nulls = col.isnull()
+            res = like_series(col)
+            if positive:
+                return res.mask(nulls, None)
+            return (res == 0).mask(nulls, None)
+        else:
+            res = self.like(
+                self.to_series([col]), expr=expr, ignore_case=ignore_case
+            ).iloc[0]
+            return None if pd.isna(res) else bool(res)
 
     def cols_to_df(self, cols: List[Any], names: Optional[List[str]] = None) -> TDf:
         """Construct the dataframe from a list of columns (series)

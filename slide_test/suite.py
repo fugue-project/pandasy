@@ -820,6 +820,158 @@ class SlideTestSuite(object):
                 check_order=False,
             )
 
+        def test_like(self):
+            # nulls
+            for p in [True, False]:
+                for i in [True, False]:
+                    assert (
+                        self.utils.like(None, None, ignore_case=i, positive=p) is None
+                    )
+                    assert self.utils.like("x", None, ignore_case=i, positive=p) is None
+
+            # empty
+            assert self.utils.like("", "")
+            assert not self.utils.like("abc", "")
+
+            # simple
+            assert not self.utils.like("abc", "aBc")
+            assert self.utils.like("abc", "aBc", ignore_case=True)
+
+            # start
+            assert not self.utils.like("abc", "aB%")
+            assert not self.utils.like("abc", "aB_")
+            assert self.utils.like("abc", "aB%", ignore_case=True)
+            assert self.utils.like("abc", "aB_", ignore_case=True)
+
+            # end
+            assert not self.utils.like("abc", "%Bc")
+            assert not self.utils.like("abc", "_Bc")
+            assert self.utils.like("abc", "%Bc", ignore_case=True)
+            assert self.utils.like("abc", "_Bc", ignore_case=True)
+
+            # start end
+            assert not self.utils.like("abc", "A_c")
+            assert not self.utils.like("abc", "A%c")
+            assert self.utils.like("abc", "A_c", ignore_case=True)
+            assert self.utils.like("abc", "A%c", ignore_case=True)
+
+            # contain
+            assert not self.utils.like("abc", "%B%")
+            assert not self.utils.like("abc", "_B_")
+            assert self.utils.like("abc", "%B%", ignore_case=True)
+            assert self.utils.like("abc", "_B_", ignore_case=True)
+
+            # not empty
+            assert self.utils.like("abc", "_%")
+            assert self.utils.like("abc", "%_")
+            assert self.utils.like("abc", "%_%")
+
+            # any
+            assert self.utils.like("abc", "%")
+
+        def test_like_sql(self):
+            pdf = pd.DataFrame(
+                dict(a=["abc", "ABC", "abd", "aBd", "", "ab\\%\\_c", None])
+            )
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.like(df["a"], None)
+            df["i"] = self.utils.like(df["a"], "")
+            df["j"] = self.utils.like(df["a"], "abc", ignore_case=True)
+            df["k"] = self.utils.like(df["a"], "aBc", ignore_case=False)
+            df["l"] = self.utils.like(df["a"], "ab%", ignore_case=True)
+            df["m"] = self.utils.like(df["a"], "aB%", ignore_case=False)
+            df["n"] = self.utils.like(df["a"], "%bc", ignore_case=True)
+            df["o"] = self.utils.like(df["a"], "%bc", ignore_case=False)
+            df["p"] = self.utils.like(df["a"], "a%c", ignore_case=True)
+            df["q"] = self.utils.like(df["a"], "a%c", ignore_case=False)
+            df["r"] = self.utils.like(df["a"], "%bc%", ignore_case=True)
+            df["s"] = self.utils.like(df["a"], "%bc%", ignore_case=False)
+            df["t"] = self.utils.like(df["a"], "%_")
+            df["u"] = self.utils.like(df["a"], "_%")
+            df["v"] = self.utils.like(df["a"], "%_%")
+            df["w"] = self.utils.like(df["a"], "_a%", ignore_case=True)
+            df["x"] = self.utils.like(df["a"], "_a%", ignore_case=False)
+            df["y"] = self.utils.like(df["a"], "%")
+
+            assert_duck_eq(
+                self.to_pd(df[list("hijklmnopqrstuvwxy")]),
+                """
+                SELECT
+                    a LIKE NULL AS h,
+                    a LIKE '' AS i,
+                    a ILIKE 'abc' AS j,
+                    a LIKE 'aBc' AS k,
+                    a ILIKE 'ab%' AS l,
+                    a LIKE 'aB%' AS m,
+                    a ILIKE '%bc' AS n,
+                    a LIKE '%bc' AS o,
+                    a ILIKE 'a%c' AS p,
+                    a LIKE 'a%c' AS q,
+                    a ILIKE '%bc%' AS r,
+                    a LIKE '%bc%' AS s,
+                    a LIKE '%_' AS t,
+                    a LIKE '_%' AS u,
+                    a LIKE '%_%' AS v,
+                    a ILIKE '_a%' AS w,
+                    a LIKE '_a%' AS x,
+                    a LIKE '%' AS y
+                FROM a
+                """,
+                a=pdf,
+                check_order=False,
+            )
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.like(df["a"], None, positive=False)
+            df["i"] = self.utils.like(df["a"], "", positive=False)
+            df["j"] = self.utils.like(df["a"], "abc", ignore_case=True, positive=False)
+            df["k"] = self.utils.like(df["a"], "aBc", ignore_case=False, positive=False)
+            df["l"] = self.utils.like(df["a"], "ab%", ignore_case=True, positive=False)
+            df["m"] = self.utils.like(df["a"], "aB%", ignore_case=False, positive=False)
+            df["n"] = self.utils.like(df["a"], "%bc", ignore_case=True, positive=False)
+            df["o"] = self.utils.like(df["a"], "%bc", ignore_case=False, positive=False)
+            df["p"] = self.utils.like(df["a"], "a%c", ignore_case=True, positive=False)
+            df["q"] = self.utils.like(df["a"], "a%c", ignore_case=False, positive=False)
+            df["r"] = self.utils.like(df["a"], "%bc%", ignore_case=True, positive=False)
+            df["s"] = self.utils.like(
+                df["a"], "%bc%", ignore_case=False, positive=False
+            )
+            df["t"] = self.utils.like(df["a"], "%_", positive=False)
+            df["u"] = self.utils.like(df["a"], "_%", positive=False)
+            df["v"] = self.utils.like(df["a"], "%_%", positive=False)
+            df["w"] = self.utils.like(df["a"], "_a%", ignore_case=True, positive=False)
+            df["x"] = self.utils.like(df["a"], "_a%", ignore_case=False, positive=False)
+            df["y"] = self.utils.like(df["a"], "%", positive=False)
+
+            assert_duck_eq(
+                self.to_pd(df[list("hijklmnopqrstuvwxy")]),
+                """
+                SELECT
+                    a NOT LIKE NULL AS h,
+                    a NOT LIKE '' AS i,
+                    a NOT ILIKE 'abc' AS j,
+                    a NOT LIKE 'aBc' AS k,
+                    a NOT ILIKE 'ab%' AS l,
+                    a NOT LIKE 'aB%' AS m,
+                    a NOT ILIKE '%bc' AS n,
+                    a NOT LIKE '%bc' AS o,
+                    a NOT ILIKE 'a%c' AS p,
+                    a NOT LIKE 'a%c' AS q,
+                    a NOT ILIKE '%bc%' AS r,
+                    a NOT LIKE '%bc%' AS s,
+                    a NOT LIKE '%_' AS t,
+                    a NOT LIKE '_%' AS u,
+                    a NOT LIKE '%_%' AS v,
+                    a NOT ILIKE '_a%' AS w,
+                    a NOT LIKE '_a%' AS x,
+                    a NOT LIKE '%' AS y
+                FROM a
+                """,
+                a=pdf,
+                check_order=False,
+            )
+
         def test_cast_constant(self):
             assert self.utils.cast(None, bool) is None
             assert self.utils.cast(True, bool)
