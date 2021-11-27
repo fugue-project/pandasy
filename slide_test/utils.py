@@ -4,6 +4,7 @@ from typing import Any, Dict
 import numpy as np
 import pandas as pd
 import duckdb
+import pyarrow as pa
 
 
 def assert_duck_eq(
@@ -20,7 +21,7 @@ def assert_duck_eq(
     conn = duckdb.connect()
     try:
         for k, v in tables.items():
-            conn.register(k, v)
+            conn.register_arrow(k, pa.Table.from_pandas(v))
         df2 = conn.execute(sql).fetchdf()
     finally:
         conn.close()

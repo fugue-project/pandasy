@@ -201,22 +201,14 @@ class SlideUtils(Generic[TDf, TCol]):
         c1 = self._safe_bool(col1)
         c2 = self._safe_bool(col2)
         if op == "and":
-            s: Any = c1 * c2
-            # in sql, FALSE AND anything is False
-            if self.is_series(s):
-                s = s.mask((c1 == 0) | (c2 == 0), 0)
-            elif (c1 == 0) | (c2 == 0):
-                s = 0.0
+            if not self.is_series(c1) and not self.is_series(c2):
+                return c1 and c2
+            return c1 & c2
         elif op == "or":
-            s = c1 + c2
-            # in sql, True OR anything is True
-            if self.is_series(s):
-                s = s.mask((c1 > 0) | (c2 > 0), 1)
-            elif (c1 > 0) | (c2 > 0):
-                s = 1.0
-        else:  # pragma: no cover
-            raise NotImplementedError(f"{op} is not supported")
-        return s
+            if not self.is_series(c1) and not self.is_series(c2):
+                return c1 or c2
+            return c1 | c2
+        raise NotImplementedError(f"{op} is not supported")  # pragma: no cover
 
     def logical_not(self, col: Any) -> Any:
         """Logical ``NOT``
@@ -225,13 +217,10 @@ class SlideUtils(Generic[TDf, TCol]):
 
         All behaviors should be consistent with SQL correspondent operations.
         """
-        s = self._safe_bool(col)
-        if self.is_series(s):
-            nulls = s.isnull()
-            s = s == 0
-            s = s.mask(nulls, None)
-            return s
-        return 1.0 - s
+        b = self._safe_bool(col)
+        if self.is_series(b):
+            return ~b
+        return None if b is None else not b
 
     def cast(  # noqa: C901
         self, col: Any, type_obj: Any, input_type: Any = None
@@ -345,8 +334,8 @@ class SlideUtils(Generic[TDf, TCol]):
         """
         c = self._safe_bool(cond)
         if self.is_series(c):
-            return df[c > 0]
-        elif c > 0:
+            return df[c]
+        elif c:
             return df
         else:
             return df.head(0)
@@ -978,10 +967,10 @@ class SlideUtils(Generic[TDf, TCol]):
 
     def _safe_bool(self, col: Any) -> Any:
         if self.is_series(col):
-            return col.astype("f8")
+            return col.astype("boolean")
         if col is None:
-            return float("nan")
-        return float(col > 0)
+            return None
+        return col != 0
 
     def _preprocess_set_op(self, ndf1: TDf, ndf2: TDf) -> Tuple[TDf, TDf]:
         assert_or_throw(

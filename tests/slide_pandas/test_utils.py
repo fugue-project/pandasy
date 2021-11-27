@@ -28,5 +28,5 @@ class PandasTests(SlideTestSuite.Tests):
             if enforce_type:
                 df = self.utils.enforce_type(df, s, null_safe=null_safe)
         else:
-            df = pd.DataFrame(data, columns=columns)
+            df = pd.DataFrame(data, columns=columns).copy()
         return df
