@@ -3,9 +3,12 @@ from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 from slide.exceptions import SlideInvalidOperation
 from slide.utils import SlideUtils
 from triad.utils.assertion import assert_or_throw
+from triad.utils.pyarrow import to_pa_datatype
+from pandas.api.types import is_object_dtype
 
 _KEY_COL_NAME = "__safe_groupby_key__"
 _DEFAULT_DATETIME = datetime(2000, 1, 1)
@@ -76,14 +79,14 @@ class PandasUtils(SlideUtils[pd.DataFrame, pd.Series]):
             return func(df.drop(keys, axis=1).reset_index(drop=True))
 
         def _fillna_default(col: Any) -> Any:
-            dtype = col.dtype
-            if np.issubdtype(dtype, np.datetime64):
+            if is_object_dtype(col.dtype):
+                return col.fillna(0)
+            ptype = to_pa_datatype(col.dtype)
+            if pa.types.is_timestamp(ptype) or pa.types.is_date(ptype):
                 return col.fillna(_DEFAULT_DATETIME)
-            if np.issubdtype(dtype, np.str_) or np.issubdtype(
-                dtype, np.string_
-            ):  # pragma: no cover
+            if pa.types.is_string(ptype):  # pragma: no cover
                 return col.fillna("")
-            if np.issubdtype(dtype, np.bool_):
+            if pa.types.is_boolean(ptype):
                 return col.fillna(False)
             return col.fillna(0)
 

@@ -46,8 +46,7 @@ class SlideTestSuite(object):
             self,
             data: Any,
             columns: Any = None,
-            enforce_type: bool = True,
-            null_safe: bool = False,
+            coerce: bool = True,
         ):
             raise NotImplementedError
 
@@ -828,6 +827,26 @@ class SlideTestSuite(object):
             assert 4 == self.utils.case_when((False, 1), (False, 3), default=4)
 
         def test_case_when_sql(self):
+            pdf = make_rand_df(20, a=bool, b=str, c=bool, d=(str, 10), e=(str, 10))
+
+            df = self.to_df(pdf)
+            df["h"] = self.utils.case_when((df["a"], df["b"]), (df["c"], df["d"]))
+            df["i"] = self.utils.case_when(
+                (df["a"], df["b"]), (df["c"], df["d"]), default=df["e"]
+            )
+
+            assert_duck_eq(
+                self.to_pd(df[list("hi")]),
+                """
+                SELECT
+                    CASE WHEN a THEN b WHEN c THEN d END AS h,
+                    CASE WHEN a THEN b WHEN c THEN d ELSE e END AS i
+                FROM a
+                """,
+                a=pdf,
+                check_order=False,
+            )
+
             pdf = make_rand_df(
                 20, a=(bool, 10), b=(str, 10), c=(bool, 10), d=(str, 10), e=(str, 10)
             )
@@ -1279,31 +1298,6 @@ class SlideTestSuite(object):
                 check_order=False,
             )
 
-            pdf = pd.DataFrame(
-                dict(
-                    a=[2.0, 0.0, float("nan")],
-                )
-            )
-
-            df = self.to_df(pdf)
-            df["h"] = self.utils.cast(df.a, int, bool)
-            df["i"] = self.utils.cast(df.a, float, bool)
-            df["j"] = self.utils.cast(df.a, bool, bool)
-            df["k"] = self.utils.cast(df.a, str, bool)
-
-            assert_pdf_eq(
-                self.to_pd(df[list("hijk")]),
-                pd.DataFrame(
-                    dict(
-                        h=[1, 0, None],
-                        i=[1.0, 0.0, None],
-                        j=[2.0, 0.0, float("nan")],
-                        k=["true", "false", None],
-                    ),
-                ),
-                check_order=False,
-            )
-
             # from strings
             pdf = pd.DataFrame(
                 dict(
@@ -1332,6 +1326,17 @@ class SlideTestSuite(object):
                 ),
                 check_order=False,
             )
+
+            # invalid
+            pdf = pd.DataFrame(
+                dict(
+                    a=[datetime(2020, 1, 1)],
+                )
+            )
+
+            df = self.to_df(pdf)
+            with raises(SlideCastError):
+                df["h"] = self.utils.cast(df.a, bool)
 
         def test_cast_int(self):
             # happy path
@@ -1447,6 +1452,17 @@ class SlideTestSuite(object):
             # with raises(SlideCastError):
             #    df["h"] = self.utils.cast(df.a, "int8")
 
+            # invalid
+            pdf = pd.DataFrame(
+                dict(
+                    a=[datetime(2020, 1, 1)],
+                )
+            )
+
+            df = self.to_df(pdf)
+            with raises(SlideCastError):
+                df["h"] = self.utils.cast(df.a, int)
+
         def test_cast_float(self):
             # happy path
             pdf = pd.DataFrame(
@@ -1463,17 +1479,15 @@ class SlideTestSuite(object):
             df["h"] = self.utils.cast(df.a, float)
             df["i"] = self.utils.cast(df.b, float)
             df["j"] = self.utils.cast(df.c, float)
-            df["k"] = self.utils.cast(df.d, float, bool)
             df["l"] = self.utils.cast(df.e, float)
 
             assert_pdf_eq(
-                self.to_pd(df[list("hijkl")]),
+                self.to_pd(df[list("hijl")]),
                 pd.DataFrame(
                     dict(
                         h=[1, 0, 1],
                         i=[2, 3, 4],
                         j=[1.1, 2.2, 3.3],
-                        k=[1.0, 0.0, 1.0],
                         l=[5.5, 6.6, 7.7],
                     ),
                 ),
@@ -1681,22 +1695,30 @@ class SlideTestSuite(object):
             )
 
             df = self.to_df(pdf)
-            df["h"] = self.utils.cast(df.a, "date")
-            df["i"] = self.utils.cast(df.a, "datetime")
+            df["h"] = self.utils.cast(df.a, date)
+            df["i"] = self.utils.cast(df.a, datetime)
             df["j"] = self.utils.cast(df.b, "date")
-            df["k"] = self.utils.cast(df.b, "datetime")
+            df["k"] = self.utils.cast(df.b, datetime)
 
             assert_pdf_eq(
                 self.to_pd(df[list("hijk")]),
                 pd.DataFrame(
                     dict(
-                        h=[date(2020, 1, 1), date(2020, 1, 2), date(2020, 1, 3)],
+                        h=[
+                            datetime(2020, 1, 1),
+                            datetime(2020, 1, 2),
+                            datetime(2020, 1, 3),
+                        ],
                         i=[
                             datetime(2020, 1, 1),
                             datetime(2020, 1, 2),
                             datetime(2020, 1, 3),
                         ],
-                        j=[date(2020, 1, 1), date(2020, 1, 2), date(2020, 1, 3)],
+                        j=[
+                            datetime(2020, 1, 1),
+                            datetime(2020, 1, 2),
+                            datetime(2020, 1, 3),
+                        ],
                         k=[
                             datetime(2020, 1, 1, 1),
                             datetime(2020, 1, 2, 14),
@@ -1710,7 +1732,7 @@ class SlideTestSuite(object):
             # str -> date with None
             pdf = pd.DataFrame(
                 dict(
-                    a=["2020-01-01", "2020-01-02", None],
+                    a=["2020-01-01 01:00:00", "2020-01-02 00:00:00", None],
                 )
             )
 
@@ -1721,7 +1743,7 @@ class SlideTestSuite(object):
                 self.to_pd(df[list("h")]),
                 pd.DataFrame(
                     dict(
-                        h=[date(2020, 1, 1), date(2020, 1, 2), None],
+                        h=[datetime(2020, 1, 1), datetime(2020, 1, 2), None],
                     ),
                 ),
                 check_order=False,
@@ -1746,6 +1768,44 @@ class SlideTestSuite(object):
                 ),
                 check_order=False,
             )
+
+        def test_cast_df(self):
+            a = pd.DataFrame(dict(a=[1, 2, None], b=[True, None, False]))
+            df = self.utils.cast_df(
+                a.convert_dtypes(), Schema("a:int,b:bool").pa_schema
+            )
+            assert pd.Int32Dtype() == df["a"].dtype
+            assert pd.BooleanDtype() == df["b"].dtype
+
+            df = self.utils.cast_df(a, Schema("a:str,b:str").pa_schema)
+            assert pd.StringDtype() == df["a"].dtype
+            assert pd.StringDtype() == df["b"].dtype
+
+            # with input hint
+            a = pd.DataFrame(dict(a=[1, 2, None], b=[None, None, None]))
+            df = self.utils.cast_df(
+                a,
+                Schema("a:double,b:int").pa_schema,
+                Schema("a:int,b:double").pa_schema,
+            )
+            assert pd.api.types.is_float_dtype(df["a"].dtype)
+            assert pd.api.types.is_integer_dtype(df["b"].dtype)
+
+            # empty
+            a = pd.DataFrame(dict(a=[], b=[]))
+            df = self.utils.cast_df(a, Schema("a:double,b:int").pa_schema)
+            assert pd.api.types.is_float_dtype(df["a"].dtype)
+            assert pd.api.types.is_integer_dtype(df["b"].dtype)
+
+            # empty + input hint
+            a = pd.DataFrame(dict(a=[], b=[]))
+            df = self.utils.cast_df(
+                a,
+                Schema("a:double,b:int").pa_schema,
+                Schema("a:int,b:double").pa_schema,
+            )
+            assert pd.api.types.is_float_dtype(df["a"].dtype)
+            assert pd.api.types.is_integer_dtype(df["b"].dtype)
 
         def test_cols_to_df(self):
             df = self.to_df([["a", 1]], "a:str,b:long")
@@ -1820,7 +1880,7 @@ class SlideTestSuite(object):
             )
 
             # prevent pandas auto type casting
-            df = self.to_df([[1.0, 1.1]], "a:double,b:int", null_safe=True)
+            df = self.to_df([[1.0, 1.0]], "a:double,b:int")
             data = self.utils.as_array(df, schema=Schema("a:double,b:int").pa_schema)
             assert [[1.0, 1]] == data
             assert isinstance(data[0][0], float)
@@ -1828,25 +1888,24 @@ class SlideTestSuite(object):
             assert [[1.0, 1]] == self.utils.as_array(df, columns=["a", "b"])
             assert [[1, 1.0]] == self.utils.as_array(df, columns=["b", "a"])
 
-            df = self.to_df([[np.float64(1.0), 1.1]], "a:double,b:int", null_safe=True)
+            df = self.to_df([[np.float64(1.0), 1.0]], "a:double,b:int")
             assert [[1.0, 1]] == self.utils.as_array(df)
             assert isinstance(self.utils.as_array(df)[0][0], float)
             assert isinstance(self.utils.as_array(df)[0][1], int)
 
             df = self.to_df(
-                [[pd.Timestamp("2020-01-01"), 1.1]],
+                [[pd.Timestamp("2020-01-01"), 1.0]],
                 "a:datetime,b:int",
-                null_safe=True,
             )
             assert [[datetime(2020, 1, 1), 1]] == self.utils.as_array(df)
             assert isinstance(self.utils.as_array(df, type_safe=True)[0][0], datetime)
             assert isinstance(self.utils.as_array(df, type_safe=True)[0][1], int)
 
-            df = self.to_df([[pd.NaT, 1.1]], "a:datetime,b:int", null_safe=True)
+            df = self.to_df([[pd.NaT, 1.0]], "a:datetime,b:int")
             assert self.utils.as_array(df, type_safe=True)[0][0] is None
             assert isinstance(self.utils.as_array(df, type_safe=True)[0][1], int)
 
-            df = self.to_df([[1.0, 1.1]], "a:double,b:int", null_safe=True)
+            df = self.to_df([[1.0, 1.0]], "a:double,b:int")
             assert [[1.0, 1]] == self.utils.as_array(df, type_safe=True)
             assert isinstance(self.utils.as_array(df)[0][0], float)
             assert isinstance(self.utils.as_array(df)[0][1], int)
@@ -1880,14 +1939,14 @@ class SlideTestSuite(object):
             # assert [[dict(a=None, b=[30, 40])]] == a
 
             data = [[[json.dumps(dict(b=[30, "40"]))]]]
-            df = self.to_df(data, "a:[{a:str,b:[int]}]", enforce_type=False)
+            df = self.to_df(data, "a:[{a:str,b:[int]}]", coerce=False)
             a = self.utils.as_array(
                 df, schema=Schema("a:[{a:str,b:[int]}]").pa_schema, type_safe=True
             )
             assert [[[dict(a=None, b=[30, 40])]]] == a
 
             data = [[json.dumps(["1", 2])]]
-            df = self.to_df(data, "a:[int]", enforce_type=False)
+            df = self.to_df(data, "a:[int]", coerce=False)
             a = self.utils.as_array(
                 df, schema=Schema("a:[int]").pa_schema, type_safe=True
             )
@@ -1901,44 +1960,35 @@ class SlideTestSuite(object):
             assert [[b, b"xy"]] == a
 
         def test_nan_none(self):
-            df = self.to_df([[None, None]], "b:str,c:double", null_safe=True)
-            assert df.iloc[0, 0] is None
+            df = self.to_df([[None, None]], "b:str,c:double")
+            assert pd.isna(df.iloc[0, 0])
             arr = self.utils.as_array(df, type_safe=True)[0]
             assert arr[0] is None
             assert arr[1] is None
 
-            df = self.to_df([[None, None]], "b:int,c:bool", null_safe=True)
+            df = self.to_df([[None, None]], "b:int,c:bool")
             arr = self.utils.as_array(df, type_safe=True)[0]
             assert arr[0] is None
             assert arr[1] is None
 
-            df = self.to_df([], "b:str,c:double", null_safe=True)
+            df = self.to_df([], "b:str,c:double")
             assert len(self.utils.as_array(df)) == 0
 
         def test_boolean_enforce(self):
-            df = self.to_df(
-                [[1, True], [2, False], [3, None]], "b:int,c:bool", null_safe=True
-            )
+            df = self.to_df([[1, True], [2, False], [3, None]], "b:int,c:bool")
             arr = self.utils.as_array(df, type_safe=True)
             assert [[1, True], [2, False], [3, None]] == arr
 
-            df = self.to_df([[1, 1], [2, 0]], "b:int,c:bool", null_safe=True)
+            df = self.to_df([[1, 1], [2, 0]], "b:int,c:bool")
             arr = self.utils.as_array(df, type_safe=True)
             assert [[1, True], [2, False]] == arr
 
-            df = self.to_df(
-                [[1, "trUe"], [2, "False"], [3, None]],
-                "b:int,c:bool",
-                null_safe=True,
-            )
-
+            df = self.to_df([[1, 1.0], [2, 0.0]], "b:int,c:bool")
             arr = self.utils.as_array(df, type_safe=True)
-            assert [[1, True], [2, False], [3, None]] == arr
+            assert [[1, True], [2, False]] == arr
 
         def test_sql_group_by_apply(self):
-            df = self.to_df(
-                [["a", 1], ["a", 2], [None, 3]], "b:str,c:long", null_safe=True
-            )
+            df = self.to_df([["a", 1], ["a", 2], [None, 3]], "b:str,c:long")
 
             def _m1(df):
                 self.utils.ensure_compatible(df)
@@ -1949,26 +1999,29 @@ class SlideTestSuite(object):
             self.utils.ensure_compatible(res)
             assert 3 == res.shape[0]
             assert 3 == res.shape[1]
-            assert [["a", 1, 2], ["a", 2, 2], [None, 3, 1]] == res.values.tolist()
+            assert [["a", 1, 2], ["a", 2, 2], [None, 3, 1]] == self.utils.as_array(
+                res, type_safe=True
+            )
 
             res = self.utils.sql_groupby_apply(df, [], _m1)
             self.utils.ensure_compatible(res)
             assert 3 == res.shape[0]
             assert 3 == res.shape[1]
-            assert [["a", 1, 3], ["a", 2, 3], [None, 3, 3]] == res.values.tolist()
+            assert [["a", 1, 3], ["a", 2, 3], [None, 3, 3]] == self.utils.as_array(
+                res, type_safe=True
+            )
 
             df = self.to_df(
                 [[1.0, "a"], [1.0, "b"], [None, "c"], [None, "d"]],
                 "b:double,c:str",
-                null_safe=True,
             )
             res = self.utils.sql_groupby_apply(df, ["b"], _m1)
             assert [
                 [1.0, "a", 2],
                 [1.0, "b", 2],
-                [float("nan"), "c", 2],
-                [float("nan"), "d", 2],
-            ].__repr__() == res.values.tolist().__repr__()
+                [None, "c", 2],
+                [None, "d", 2],
+            ].__repr__() == self.utils.as_array(res, type_safe=True).__repr__()
 
         def test_sql_group_by_apply_special_types(self):
             def _m1(df):
@@ -1979,7 +2032,6 @@ class SlideTestSuite(object):
             df = self.to_df(
                 [["a", 1.0], [None, 3.0], [None, 3.0], [None, None]],
                 "a:str,b:double",
-                null_safe=True,
             )
             res = self.utils.sql_groupby_apply(df, ["a", "b"], _m1)
             self.utils.ensure_compatible(res)
@@ -1995,7 +2047,6 @@ class SlideTestSuite(object):
                             [None, None, 1],
                         ],
                         "a:str,b:double,ct:int",
-                        null_safe=True,
                     )
                 ),
                 self.to_pd(res),
@@ -2005,7 +2056,6 @@ class SlideTestSuite(object):
             df = self.to_df(
                 [["a", dt], [None, dt], [None, dt], [None, None]],
                 "a:str,b:datetime",
-                null_safe=True,
             )
             res = self.utils.sql_groupby_apply(df, ["a", "b"], _m1)
             self.utils.ensure_compatible(res)
@@ -2016,7 +2066,6 @@ class SlideTestSuite(object):
                     self.to_df(
                         [["a", dt, 1], [None, dt, 2], [None, dt, 2], [None, None, 1]],
                         "a:str,b:datetime,ct:int",
-                        null_safe=True,
                     )
                 ),
                 self.to_pd(res),
@@ -2026,7 +2075,6 @@ class SlideTestSuite(object):
             df = self.to_df(
                 [["a", dt], [None, dt], [None, dt], [None, None]],
                 "a:str,b:date",
-                null_safe=True,
             )
             res = self.utils.sql_groupby_apply(df, ["a", "b"], _m1)
             self.utils.ensure_compatible(res)
@@ -2037,7 +2085,6 @@ class SlideTestSuite(object):
                     self.to_df(
                         [["a", dt, 1], [None, dt, 2], [None, dt, 2], [None, None, 1]],
                         "a:str,b:date,ct:int",
-                        null_safe=True,
                     )
                 ),
                 self.to_pd(res),
@@ -2047,7 +2094,6 @@ class SlideTestSuite(object):
             df = self.to_df(
                 [["a", dt], ["b", dt], ["b", dt], ["b", None]],
                 "a:str,b:date",
-                null_safe=True,
             )
             res = self.utils.sql_groupby_apply(df, ["a", "b"], _m1)
             self.utils.ensure_compatible(res)
@@ -2058,7 +2104,6 @@ class SlideTestSuite(object):
                     self.to_df(
                         [["a", dt, 1], ["b", dt, 2], ["b", dt, 2], ["b", None, 1]],
                         "a:str,b:date,ct:int",
-                        null_safe=True,
                     )
                 ),
                 self.to_pd(res),

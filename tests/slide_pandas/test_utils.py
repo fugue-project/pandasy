@@ -19,14 +19,13 @@ class PandasTests(SlideTestSuite.Tests):
         self,
         data: Any,
         columns: Any = None,
-        enforce_type: bool = True,
-        null_safe: bool = False,
+        coerce: bool = True,
     ):
         if isinstance(columns, str):
             s = expression_to_schema(columns)
             df = pd.DataFrame(data, columns=s.names)
-            if enforce_type:
-                df = self.utils.enforce_type(df, s, null_safe=null_safe)
+            if coerce:
+                df = self.utils.cast_df(df.convert_dtypes(), s)
         else:
             df = pd.DataFrame(data, columns=columns).copy()
         return df

@@ -20,7 +20,7 @@ from triad.utils.pyarrow import (
     TRIAD_DEFAULT_TIMESTAMP,
     apply_schema,
     to_pa_datatype,
-    to_pandas_dtype,
+    to_single_pandas_dtype,
 )
 
 TDf = TypeVar("TDf", bound=Any)
@@ -109,7 +109,7 @@ class SlideUtils(Generic[TDf, TCol]):
             tp = col.dtype
             if tp == np.dtype("object") or tp == np.dtype(str):
                 return pa.string()
-            return pa.from_numpy_dtype(tp)
+            return to_pa_datatype(tp)
         return to_pa_datatype(type(col))
 
     def unary_arithmetic_op(self, col: Any, op: str) -> Any:
@@ -243,70 +243,41 @@ class SlideUtils(Generic[TDf, TCol]):
         type information.
         """
         to_type = to_pa_datatype(type_obj)
-        p_type = str if pa.types.is_string(to_type) else to_type.to_pandas_dtype()
+        t_type = to_single_pandas_dtype(to_type, use_extension_types=True)
         if self.is_series(col):
             try:
                 try:
-                    from_type = (
-                        self.get_col_pa_type(col)
-                        if input_type is None
-                        else to_pa_datatype(input_type)
-                    )
-                    if from_type == to_type:
+                    inf_type = self.get_col_pa_type(col)
+                    has_hint = input_type is not None
+                    from_type = inf_type if not has_hint else to_pa_datatype(input_type)
+                    if pa.types.is_string(to_type):
+                        if (
+                            has_hint
+                            and pa.types.is_string(from_type)
+                            and pa.types.is_string(inf_type)
+                        ):
+                            return col
+                    elif from_type == inf_type == to_type:
                         return col
                 except Exception:  # pragma: no cover
-                    return col.astype(p_type)
-                if pa.types.is_boolean(from_type):
-                    if pa.types.is_string(to_type):
-                        nulls = col.isnull()
-                        neg = col == 0
-                        pos = col != 0
-                        res = col.astype(str)
-                        return (
-                            res.mask(neg, "false").mask(pos, "true").mask(nulls, None)
-                        )
-                    if pa.types.is_integer(to_type) or pa.types.is_floating(to_type):
-                        nulls = col.isnull()
-                        return (col.fillna(0) != 0).astype(p_type).mask(nulls, None)
-                if pa.types.is_integer(from_type):
-                    if pa.types.is_boolean(to_type):
-                        return col != 0
-                    if pa.types.is_string(to_type):
-                        temp = col.astype(np.float64)
-                        nulls = temp.isnull()
-                        return (
-                            temp.fillna(0)
-                            .astype(np.int64)
-                            .astype(p_type)
-                            .mask(nulls, None)
-                        )
-                elif pa.types.is_floating(from_type):
-                    if pa.types.is_boolean(to_type):
-                        nulls = col.isnull()
-                        return (col != 0).mask(nulls, None)
-                    if pa.types.is_integer(to_type):
-                        nulls = col.isnull()
-                        return col.fillna(0).astype(p_type).mask(nulls, None)
-                    if pa.types.is_string(to_type):
-                        nulls = col.isnull()
-                        return col.fillna(0).astype(p_type).mask(nulls, None)
-                elif pa.types.is_string(from_type):
-                    if pa.types.is_boolean(to_type):
-                        lower = col.str.lower()
-                        res = lower.isin(["true", "1", "1.0"])
-                        nulls = (~res) & (~lower.isin(["false", "0", "0.0"]))
-                        return res.mask(nulls, None)
-                    if pa.types.is_integer(to_type):
-                        temp = col.astype(np.float64)
-                        nulls = temp.isnull()
-                        return temp.fillna(0).astype(p_type).mask(nulls, None)
-                elif pa.types.is_timestamp(from_type) or pa.types.is_date(from_type):
-                    if pa.types.is_string(to_type):
-                        nulls = col.isnull()
-                        return col.astype(p_type).mask(nulls, None)
-                return col.astype(p_type)
+                    return col.astype(t_type)
+                if pa.types.is_boolean(to_type):
+                    return self._cast_to_bool(col, from_type, inf_type, t_type)
+                if pa.types.is_integer(to_type):
+                    return self._cast_to_int(col, from_type, inf_type, t_type)
+                elif pa.types.is_floating(to_type):
+                    return self._cast_to_float(col, from_type, inf_type, t_type)
+                elif pa.types.is_timestamp(to_type):
+                    return self._cast_to_datetime(col, from_type, inf_type, t_type)
+                elif pa.types.is_date(to_type):
+                    return self._cast_to_date(col, from_type, inf_type, t_type)
+                elif pa.types.is_string(to_type):
+                    return self._cast_to_str(col, from_type, inf_type, t_type)
+                return col.astype(t_type)
             except (TypeError, ValueError) as te:
-                raise SlideCastError(f"failed to cast to {p_type}") from te
+                raise SlideCastError(
+                    f"unable to cast from {from_type} to {t_type}"
+                ) from te
         else:
             if col is None:
                 return None
@@ -490,7 +461,7 @@ class SlideUtils(Generic[TDf, TCol]):
 
         def _safe_pos(s: Any) -> Any:
             if self.is_series(s):
-                return (s > 0) | (s < 0)
+                return (~(s.isnull())) & (s != 0)
             return not pd.isna(s) and s != 0
 
         def get_series() -> Iterable[Tuple[str, Any]]:
@@ -649,7 +620,7 @@ class SlideUtils(Generic[TDf, TCol]):
             df = df[columns]
             schema = pa.schema([schema.field(n) for n in columns])
         if not type_safe:
-            for arr in df.itertuples(index=False, name=None):
+            for arr in df.astype(object).itertuples(index=False, name=None):
                 yield list(arr)
         elif all(not pa.types.is_nested(x) for x in schema.types):
             p = self.as_arrow(df, schema)
@@ -721,50 +692,30 @@ class SlideUtils(Generic[TDf, TCol]):
                 fields.append(field)
         return pa.schema(fields)
 
-    def enforce_type(  # noqa: C901
-        self, df: TDf, schema: pa.Schema, null_safe: bool = False
+    def cast_df(  # noqa: C901
+        self, df: TDf, schema: pa.Schema, input_schema: Optional[pa.Schema] = None
     ) -> TDf:
-        """Enforce the pandas like dataframe to comply with `schema`.
+        """Cast a dataframe to comply with `schema`.
 
         :param df: pandas like dataframe
-        :param schema: pyarrow schema
-        :param null_safe: whether to enforce None value for int, string and bool values
+        :param schema: pyarrow schema to convert to
+        :param input_schema: the known input pyarrow schema, defaults to None
         :return: converted dataframe
 
         .. note::
 
-        When `null_safe` is true, the native column types in the dataframe may change,
-        for example, if a column of `int64` has None values, the output will make sure
-        each value in the column is either None or an integer, however, due to the
-        behavior of pandas like dataframes, the type of the columns may
-        no longer be `int64`. This method does not enforce struct and list types
+        ``input_schema`` is important because sometimes the column types can be
+        different from expected. For example if a boolean series contains Nones,
+        the dtype will be object, without a input type hint, the function can't
+        do the conversion correctly.
         """
-        if self.empty(df):
-            return df
-        if not null_safe:
-            return df.astype(dtype=to_pandas_dtype(schema))
-        cols: List[TCol] = []
-        for v in schema:
-            s = df[v.name]
-            if pa.types.is_string(v.type):
-                ns = s.isnull()
-                s = s.astype(str).mask(ns, None)
-            elif pa.types.is_boolean(v.type):
-                ns = s.isnull()
-                if pd.api.types.is_string_dtype(s.dtype):
-                    try:
-                        s = s.str.lower() == "true"
-                    except AttributeError:
-                        s = s.fillna(0).astype(bool)
-                else:
-                    s = s.fillna(0).astype(bool)
-                s = s.mask(ns, None)
-            elif pa.types.is_integer(v.type):
-                ns = s.isnull()
-                s = s.fillna(0).astype(v.type.to_pandas_dtype()).mask(ns, None)
-            elif not pa.types.is_struct(v.type) and not pa.types.is_list(v.type):
-                s = s.astype(v.type.to_pandas_dtype())
-            cols.append(s)
+        if input_schema is None:
+            cols = [self.cast(df[v.name], v.type) for v in schema]
+        else:
+            cols = [
+                self.cast(df[v.name], v.type, input_type=i.type)
+                for v, i in zip(schema, input_schema)
+            ]
         return self.cols_to_df(cols)
 
     def sql_groupby_apply(
@@ -988,3 +939,132 @@ class SlideUtils(Generic[TDf, TCol]):
 
     def _with_indicator(self, df: TDf, name: str) -> TDf:
         return df.assign(**{name: 1})
+
+    def _cast_to_bool(
+        self,
+        col: TCol,
+        from_type: pa.DataType,
+        inf_type: pa.DataType,
+        safe_dtype: np.dtype,
+    ) -> TCol:
+        if pa.types.is_boolean(from_type):
+            if (
+                pa.types.is_integer(inf_type)
+                or pa.types.is_floating(inf_type)
+                or pa.types.is_string(inf_type)  # bool/int with nulls
+            ):
+                nulls = col.isnull()
+                return (col != 0).mask(nulls, pd.NA).astype(safe_dtype)
+        elif pa.types.is_integer(from_type) or pa.types.is_floating(from_type):
+            nulls = col.isnull()
+            return (col != 0).mask(nulls, pd.NA).astype(safe_dtype)
+        elif pa.types.is_string(from_type):
+            lower = col.str.lower()
+            res = lower.isin(["true", "1", "1.0"])
+            nulls = (~res) & (~lower.isin(["false", "0", "0.0"]))
+            return res.mask(nulls, pd.NA).astype(safe_dtype)
+        raise SlideCastError(f"unable to cast from {from_type} to {safe_dtype}")
+
+    def _cast_to_int(
+        self,
+        col: TCol,
+        from_type: pa.DataType,
+        inf_type: pa.DataType,
+        safe_dtype: np.dtype,
+    ) -> TCol:
+        def _convert_int_like() -> TCol:
+            nulls = col.isnull()
+            tp = to_single_pandas_dtype(
+                to_pa_datatype(safe_dtype), use_extension_types=False
+            )
+            return col.fillna(0).astype(tp).astype(safe_dtype).mask(nulls, pd.NA)
+
+        if pa.types.is_boolean(from_type):
+            if pa.types.is_string(inf_type):  # bool with nulls
+                return _convert_int_like()
+            return col.astype(safe_dtype)
+        elif pa.types.is_integer(from_type):
+            if pa.types.is_string(inf_type):  # pragma: no cover
+                # int with nulls
+                return _convert_int_like()
+            return col.astype(safe_dtype)
+        elif pa.types.is_floating(from_type):
+            nulls = col.isnull()
+            tp = to_single_pandas_dtype(
+                to_pa_datatype(safe_dtype), use_extension_types=False
+            )
+            return col.fillna(0).astype(tp).astype(safe_dtype).mask(nulls, pd.NA)
+        elif pa.types.is_string(from_type):  # integer string representations
+            # SQL can convert '1.1' to 1 as an integer
+            temp = col.astype(np.float64)
+            nulls = temp.isnull()
+            tp = to_single_pandas_dtype(
+                to_pa_datatype(safe_dtype), use_extension_types=False
+            )
+            return temp.fillna(0).astype(tp).astype(safe_dtype).mask(nulls, pd.NA)
+        raise SlideCastError(f"unable to cast from {from_type} to {safe_dtype}")
+
+    def _cast_to_float(
+        self,
+        col: TCol,
+        from_type: pa.DataType,
+        inf_type: pa.DataType,
+        safe_dtype: np.dtype,
+    ) -> TCol:
+        return col.astype(safe_dtype)
+
+    def _cast_to_str(
+        self,
+        col: TCol,
+        from_type: pa.DataType,
+        inf_type: pa.DataType,
+        safe_dtype: np.dtype,
+    ) -> TCol:
+        nulls = col.isnull()
+        if pa.types.is_boolean(from_type):
+            if pa.types.is_boolean(inf_type):
+                return col.astype(safe_dtype).str.lower().mask(nulls, pd.NA)
+            if (
+                pa.types.is_integer(inf_type)
+                or pa.types.is_floating(inf_type)
+                or pa.types.is_string(inf_type)  # bool with nulls
+            ):
+                return (
+                    (col != 0)
+                    .astype("boolean")
+                    .astype(safe_dtype)
+                    .str.lower()
+                    .mask(nulls, pd.NA)
+                )
+            else:  # pragma: no cover
+                raise SlideCastError(
+                    f"underlying data type {inf_type} is impossible to be boolean"
+                )
+        if pa.types.is_integer(from_type) and inf_type != from_type:
+            return (
+                col.fillna(0)
+                .astype(to_single_pandas_dtype(from_type, use_extension_types=False))
+                .astype(safe_dtype)
+                .mask(nulls, pd.NA)
+            )
+        return col.astype(safe_dtype).mask(nulls, pd.NA)
+
+    def _cast_to_datetime(
+        self,
+        col: TCol,
+        from_type: pa.DataType,
+        inf_type: pa.DataType,
+        safe_dtype: np.dtype,
+    ) -> TCol:
+        return col.astype(safe_dtype)
+
+    def _cast_to_date(
+        self,
+        col: TCol,
+        from_type: pa.DataType,
+        inf_type: pa.DataType,
+        safe_dtype: np.dtype,
+    ) -> TCol:
+        if pd.__version__ < "1.2":  # pragma: no cover
+            return col.astype(safe_dtype).dt.floor("D")
+        return col.astype(safe_dtype).dt.date

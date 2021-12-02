@@ -52,7 +52,7 @@ def assert_pdf_eq(
     df1 = df
     df2 = (
         data if isinstance(data, pd.DataFrame) else pd.DataFrame(data, columns=columns)
-    )
+    ).convert_dtypes()
     cols = list(df1.columns)
     try:
         if not check_col_order:
@@ -90,7 +90,10 @@ def assert_pdf_eq(
         return False
 
 
-def make_rand_df(size: int, **kwargs: Any) -> pd.DataFrame:  # pragma: no cover
+def make_rand_df(  # pragma: no cover  # noqa: C901
+    size: int,
+    **kwargs: Any,
+) -> pd.DataFrame:
     np.random.seed(0)
     data: Dict[str, np.ndarray] = {}
     for k, v in kwargs.items():
@@ -117,5 +120,11 @@ def make_rand_df(size: int, **kwargs: Any) -> pd.DataFrame:  # pragma: no cover
         if null_ct > 0:
             idx = np.random.choice(size, null_ct, replace=False).tolist()
             ps[idx] = None
+            if dt is bool:
+                ps = ps.astype("boolean")
+            if dt is int:
+                ps = ps.astype("Int64")
+            if dt is str:
+                ps = ps.astype("string")
         data[k] = ps
     return pd.DataFrame(data)
