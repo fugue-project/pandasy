@@ -1881,7 +1881,7 @@ class SlideTestSuite(object):
 
         def test_index_compatible(self):
             df = self.to_df([[3.0, 2], [2.1, 3]], columns=["x", "y"])
-            df = df.sort_values(["x"])
+            df = df.nlargest(100, ["x"])
             self.utils.ensure_compatible(df)
             df["p"] = "p"
             df = df.set_index(["p"])

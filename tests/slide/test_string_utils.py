@@ -10,7 +10,10 @@ def test_like_expr():
 
     def test_re(expr, re_expr, matches, no_matches):
         le = LikeExpr(expr)
-        assert re_expr == le.re()
+        if not isinstance(re_expr, str):
+            assert le.re() in re_expr
+        else:
+            assert re_expr == le.re()
         tc = re.compile(le.re())
         for m in matches:
             assert tc.match(m) is not None
@@ -52,4 +55,9 @@ def test_like_expr():
 
     test_re("", "^$", [""], [" ", "a"])
     test_re("__", "^..$", ["ab", "  "], ["abc", "a"])
-    test_re("a%bc\\%.?", r"^a.*bc%\.\?$", ["abc%.?", "afffbc%.?"], ["abc"])
+    test_re(
+        "a%bc\\%.?",
+        [r"^a.*bc%\.\?$", r"^a.*bc\%\.\?$"],
+        ["abc%.?", "afffbc%.?"],
+        ["abc"],
+    )
