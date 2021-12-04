@@ -30,11 +30,12 @@ setup(
     author_email="goodwanghan@gmail.com",
     keywords="pandas sql",
     url="http://github.com/fugue-project/slide",
-    install_requires=["triad", "pandas>=1.1.0", "numpy>=1.19"],
+    install_requires=["triad>=0.5.6", "pandas>=1.1.0", "numpy>=1.19"],
     extras_require={
         "dask": ["dask[dataframe]", "cloudpickle>=1.4.0"],
         "ray": ["pandas>=1.1.2", "modin[ray]>=0.8.1.1"],
-        "all": ["dask[dataframe]", "cloudpickle>=1.4.0", "modin[ray]"],
+        "all": ["dask[dataframe]", "cloudpickle>=1.4.0"],
+        "test": ["duckdb"],
     },
     classifiers=[
         # "3 - Alpha", "4 - Beta" or "5 - Production/Stable"
@@ -45,6 +46,7 @@ setup(
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3 :: Only",
     ],
     python_requires=">=3.6",

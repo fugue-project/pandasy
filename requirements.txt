@@ -18,6 +18,8 @@ flask
 
 pyspark
 dask[dataframe]
+duckdb
+pyarrow==5.0.0
 
 # publish to pypi
 wheel
