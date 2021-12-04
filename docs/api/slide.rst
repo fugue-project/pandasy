@@ -17,6 +17,14 @@ slide
 
 
 
+slide.exceptions
+----------------
+
+.. automodule:: slide.exceptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 slide.utils
 -----------
 
