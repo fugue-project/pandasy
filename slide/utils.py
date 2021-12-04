@@ -85,16 +85,14 @@ class SlideUtils(Generic[TDf, TCol]):
         """
         raise NotImplementedError
 
-    def to_series(
-        self, obj: Any, name: Optional[str] = None
-    ) -> TCol:  # pragma: no cover
+    def to_series(self, obj: Any, name: Optional[str] = None) -> TCol:
         """Convert an object to series
 
         :param obj: the object
         :param name: name of the series, defaults to None
         :return: the series
         """
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
 
     def series_to_array(self, col: TCol) -> List[Any]:
         """Convert a series to numpy array
@@ -102,7 +100,7 @@ class SlideUtils(Generic[TDf, TCol]):
         :param col: the series
         :return: the numpy array
         """
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
 
     def to_constant_series(
         self,

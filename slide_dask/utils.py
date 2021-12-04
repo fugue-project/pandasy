@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Any, Callable, List, Optional
 
 import dask.dataframe as dd
@@ -9,9 +8,6 @@ from slide.exceptions import SlideInvalidOperation
 from slide.utils import SlideUtils
 from triad.utils.assertion import assert_or_throw
 from triad.utils.pyarrow import to_pandas_dtype
-
-_KEY_COL_NAME = "__safe_groupby_key__"
-_DEFAULT_DATETIME = datetime(2000, 1, 1)
 
 
 class DaskUtils(SlideUtils[dd.DataFrame, dd.Series]):

@@ -16,7 +16,7 @@ from slide.exceptions import (
 from slide.utils import SlideUtils
 from slide_test.utils import assert_duck_eq, assert_pdf_eq, make_rand_df
 from triad import Schema
-from triad.utils.pyarrow import expression_to_schema
+from triad.utils.pyarrow import expression_to_schema, TRIAD_DEFAULT_TIMESTAMP
 
 
 class SlideTestSuite(object):
@@ -54,6 +54,22 @@ class SlideTestSuite(object):
         ):
             raise NotImplementedError
 
+        def test_to_safe_pa_type(self):
+            assert pa.string() == self.utils.to_safe_pa_type(np.dtype(str))
+            assert pa.string() == self.utils.to_safe_pa_type(np.dtype(object))
+            assert TRIAD_DEFAULT_TIMESTAMP == self.utils.to_safe_pa_type(
+                np.dtype("datetime64[ns]")
+            )
+
+            if pd.__version__ >= "1.2":
+                assert pa.float64() == self.utils.to_safe_pa_type(pd.Float64Dtype())
+                assert pa.float32() == self.utils.to_safe_pa_type(pd.Float32Dtype())
+
+            assert pa.string() == self.utils.to_safe_pa_type(str)
+            assert pa.string() == self.utils.to_safe_pa_type("string")
+            assert pa.date32() == self.utils.to_safe_pa_type(date)
+            assert TRIAD_DEFAULT_TIMESTAMP == self.utils.to_safe_pa_type(datetime)
+
         def test_is_series(self):
             df = self.to_df([["a", 1]], "a:str,b:long")
             assert self.utils.is_series(df["a"])
@@ -65,13 +81,16 @@ class SlideTestSuite(object):
             s1 = self.utils.to_series(pd.Series([0, 1], name="x"))
             s2 = self.utils.to_series(pd.Series([2, 3], name="x"), "y")
             s3 = self.utils.to_series([4, 5], "z")
+            s4 = self.utils.to_series(self.utils.to_series(s2), "w")
             assert self.utils.is_series(s1)
             assert self.utils.is_series(s2)
             assert self.utils.is_series(s3)
+            assert self.utils.is_series(s4)
 
-            df = self.utils.cols_to_df([s1, s2, s3])
+            df = self.utils.cols_to_df([s1, s2, s3, s4])
             assert_pdf_eq(
-                self.to_pd(df), pd.DataFrame(dict(x=[0, 1], y=[2, 3], z=[4, 5]))
+                self.to_pd(df),
+                pd.DataFrame(dict(x=[0, 1], y=[2, 3], z=[4, 5], w=[2, 3])),
             )
 
         def test_to_constant_series(self):
@@ -1507,7 +1526,7 @@ class SlideTestSuite(object):
             )
 
             df = self.to_df(pdf)
-            df["h"] = self.utils.cast(df.a, float)
+            df["h"] = self.utils.cast(df.a, "float32")
 
             assert_pdf_eq(
                 self.to_pd(df[list("h")]),
@@ -1515,7 +1534,7 @@ class SlideTestSuite(object):
                     dict(
                         h=[2.1, float("nan"), float("inf"), None],
                     ),
-                ),
+                ).astype(np.float32),
                 check_order=False,
             )
 
