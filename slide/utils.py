@@ -314,7 +314,7 @@ class SlideUtils(Generic[TDf, TCol]):
                 if pd.isna(res):
                     return None
                 return res
-        except (TypeError, ValueError, pd.errors.IntCastingNaNError) as te:
+        except (TypeError, ValueError) as te:
             raise SlideCastError(f"unable to cast from {from_type} to {t_type}") from te
 
     def filter_df(self, df: TDf, cond: Any) -> TDf:
@@ -1048,7 +1048,9 @@ class SlideUtils(Generic[TDf, TCol]):
             return col.fillna(0).astype(tp).astype(safe_dtype).mask(nulls, pd.NA)
         elif pa.types.is_string(from_type):  # integer string representations
             # SQL can convert '1.1' to 1 as an integer
-            temp = col.astype(np.float64)
+            temp = self._cast_to_float(
+                col, from_type=from_type, inf_type=inf_type, safe_dtype=np.float64
+            )
             nulls = temp.isnull()
             tp = to_single_pandas_dtype(
                 self.to_safe_pa_type(safe_dtype), use_extension_types=False

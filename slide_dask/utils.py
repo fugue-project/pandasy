@@ -126,3 +126,17 @@ class DaskUtils(SlideUtils[dd.DataFrame, dd.Series]):
         safe_dtype: np.dtype,
     ) -> dd.Series:
         return dd.to_datetime(col)
+
+    def _cast_to_float(
+        self,
+        col: dd.Series,
+        from_type: pa.DataType,
+        inf_type: pa.DataType,
+        safe_dtype: np.dtype,
+    ) -> dd.Series:
+        if pd.__version__ < "1.2":  # pragma: no cover
+            if pa.types.is_string(inf_type):
+                return col.fillna("nan").astype(safe_dtype)
+        return super()._cast_to_float(
+            col=col, from_type=from_type, inf_type=inf_type, safe_dtype=safe_dtype
+        )
