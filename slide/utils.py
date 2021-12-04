@@ -13,8 +13,6 @@ from typing import (
 import numpy as np
 import pandas as pd
 import pyarrow as pa
-from slide.exceptions import SlideCastError
-from slide._string_utils import LikeExpr, LikeExprShortcut
 from triad.utils.assertion import assert_or_throw
 from triad.utils.pyarrow import (
     TRIAD_DEFAULT_TIMESTAMP,
@@ -22,6 +20,9 @@ from triad.utils.pyarrow import (
     to_pa_datatype,
     to_single_pandas_dtype,
 )
+
+from slide._string_utils import LikeExpr, LikeExprShortcut
+from slide.exceptions import SlideCastError, SlideIndexIncompatibleError
 
 TDf = TypeVar("TDf", bound=Any)
 TCol = TypeVar("TCol", bound=Any)
@@ -63,6 +64,19 @@ def parse_join_type(join_type: str) -> str:
 class SlideUtils(Generic[TDf, TCol]):
     """A collection of utils for general pandas like dataframes"""
 
+    def to_safe_pa_type(self, tp: Any) -> pa.DataType:
+        if isinstance(tp, (np.dtype, pd.api.extensions.ExtensionDtype)):
+            if pd.api.types.is_datetime64_any_dtype(tp):
+                return TRIAD_DEFAULT_TIMESTAMP
+            if pd.api.types.is_object_dtype(tp):
+                return pa.string()
+            if pd.__version__ >= "1.2":
+                if pd.Float64Dtype() == tp:
+                    return pa.float64()
+                if pd.Float32Dtype() == tp:
+                    return pa.float32()
+        return to_pa_datatype(tp)
+
     def is_series(self, obj: Any) -> bool:  # pragma: no cover
         """Check whether is a series type
 
@@ -79,6 +93,14 @@ class SlideUtils(Generic[TDf, TCol]):
         :param obj: the object
         :param name: name of the series, defaults to None
         :return: the series
+        """
+        raise NotImplementedError
+
+    def series_to_array(self, col: TCol) -> List[Any]:
+        """Convert a series to numpy array
+
+        :param col: the series
+        :return: the numpy array
         """
         raise NotImplementedError
 
@@ -109,8 +131,8 @@ class SlideUtils(Generic[TDf, TCol]):
             tp = col.dtype
             if tp == np.dtype("object") or tp == np.dtype(str):
                 return pa.string()
-            return to_pa_datatype(tp)
-        return to_pa_datatype(type(col))
+            return self.to_safe_pa_type(tp)
+        return self.to_safe_pa_type(type(col))
 
     def unary_arithmetic_op(self, col: Any, op: str) -> Any:
         """Unary arithmetic operator on series/constants
@@ -226,13 +248,13 @@ class SlideUtils(Generic[TDf, TCol]):
         self, col: Any, type_obj: Any, input_type: Any = None
     ) -> Any:
         """Cast ``col`` to a new type. ``type_obj`` must be
-        able to be converted by :func:`~triad.utils.pyarrow.to_pa_datatype`.
+        able to be converted by :func:`~triad.utils.pyarrow.self.to_safe_pa_type`.
 
         :param col: a series or a constant
         :param type_obj: an objected that can be accepted by
-            :func:`~triad.utils.pyarrow.to_pa_datatype`
+            :func:`~triad.utils.pyarrow.self.to_safe_pa_type`
         :param input_type: an objected that is either None or to be accepted by
-            :func:`~triad.utils.pyarrow.to_pa_datatype`, defaults to None.
+            :func:`~triad.utils.pyarrow.self.to_safe_pa_type`, defaults to None.
         :return: the new column or constant
 
         .. note:
@@ -242,14 +264,16 @@ class SlideUtils(Generic[TDf, TCol]):
         nulls or strings, where the pandas dtype may not provide the accurate
         type information.
         """
-        to_type = to_pa_datatype(type_obj)
+        to_type = self.to_safe_pa_type(type_obj)
         t_type = to_single_pandas_dtype(to_type, use_extension_types=True)
-        if self.is_series(col):
-            try:
+        try:
+            if self.is_series(col):
                 try:
                     inf_type = self.get_col_pa_type(col)
                     has_hint = input_type is not None
-                    from_type = inf_type if not has_hint else to_pa_datatype(input_type)
+                    from_type = (
+                        inf_type if not has_hint else self.to_safe_pa_type(input_type)
+                    )
                     if pa.types.is_string(to_type):
                         if (
                             has_hint
@@ -274,23 +298,24 @@ class SlideUtils(Generic[TDf, TCol]):
                 elif pa.types.is_string(to_type):
                     return self._cast_to_str(col, from_type, inf_type, t_type)
                 return col.astype(t_type)
-            except (TypeError, ValueError) as te:
-                raise SlideCastError(
-                    f"unable to cast from {from_type} to {t_type}"
-                ) from te
-        else:
-            if col is None:
-                return None
-            res = self.cast(
-                self.to_series([col]),
-                type_obj=type_obj,
-                input_type=self.get_col_pa_type(col)
-                if input_type is None
-                else input_type,
-            ).iloc[0]
-            if pd.isna(res):
-                return None
-            return res
+            else:
+                if col is None:
+                    return None
+                from_type = (
+                    self.get_col_pa_type(col) if input_type is None else input_type
+                )
+                res = self.series_to_array(
+                    self.cast(
+                        self.to_series([col]),
+                        type_obj=type_obj,
+                        input_type=from_type,
+                    )
+                )[0]
+                if pd.isna(res):
+                    return None
+                return res
+        except (TypeError, ValueError, pd.errors.IntCastingNaNError) as te:
+            raise SlideCastError(f"unable to cast from {from_type} to {t_type}") from te
 
     def filter_df(self, df: TDf, cond: Any) -> TDf:
         """Filter dataframe by a boolean series or a constant
@@ -339,9 +364,9 @@ class SlideUtils(Generic[TDf, TCol]):
                     return (col != 0) | col.isnull()
             raise NotImplementedError(value)
         else:
-            return self.is_value(
-                self.to_series([col]), value=value, positive=positive
-            ).iloc[0]
+            return self.series_to_array(
+                self.is_value(self.to_series([col]), value=value, positive=positive)
+            )[0]
 
     def is_in(self, col: Any, values: List[Any], positive: bool) -> Any:  # noqa: C901
         """Check if a series or a constant is in ``values``
@@ -385,9 +410,9 @@ class SlideUtils(Generic[TDf, TCol]):
                 o = o.mask(innulls & (o == (0 if positive else 1)), None)
             return o.mask(col.isnull(), None)
         else:
-            res = self.is_in(
-                self.to_series([col]), values=values, positive=positive
-            ).iloc[0]
+            res = self.series_to_array(
+                self.is_in(self.to_series([col]), values=values, positive=positive)
+            )[0]
             return None if pd.isna(res) else bool(res)
 
     def is_between(self, col: Any, lower: Any, upper: Any, positive: bool) -> Any:
@@ -407,8 +432,16 @@ class SlideUtils(Generic[TDf, TCol]):
         if col is None:
             return None
         if self.is_series(col):
-            left = (lower <= col).fillna(False)
-            right = (col <= upper).fillna(False)
+            left = (
+                self.to_constant_series(False, col)
+                if lower is None
+                else (lower <= col).fillna(False)
+            )
+            right = (
+                self.to_constant_series(False, col)
+                if upper is None
+                else (col <= upper).fillna(False)
+            )
             ln = lower.isnull() if self.is_series(lower) else lower is None
             un = upper.isnull() if self.is_series(upper) else upper is None
             s: Any = left & right
@@ -422,9 +455,18 @@ class SlideUtils(Generic[TDf, TCol]):
                 return s
             return (s == 0).mask(s.isnull(), None)
         else:
-            res = self.is_between(
-                self.to_series([col]), lower=lower, upper=upper, positive=positive
-            ).iloc[0]
+            res = self.series_to_array(
+                self.is_between(
+                    self.to_series([col]),
+                    lower=lower
+                    if lower is None or self.is_series(lower)
+                    else self.to_series([lower]),
+                    upper=upper
+                    if upper is None or self.is_series(upper)
+                    else self.to_series([upper]),
+                    positive=positive,
+                )
+            )[0]
             return None if pd.isna(res) else bool(res)
 
     def coalesce(self, cols: List[Any]) -> Any:
@@ -477,7 +519,10 @@ class SlideUtils(Generic[TDf, TCol]):
             )
             res = tmp["d"]
             for n in reversed(range(len(pairs))):
-                res = res.mask(tmp[f"w_{n}"], tmp[f"t_{n}"])
+                if pairs[n][1] is None:
+                    res = res.mask(tmp[f"w_{n}"], pd.NA)
+                else:
+                    res = res.mask(tmp[f"w_{n}"], tmp[f"t_{n}"])
             return res
         sd = {x[0]: x[1] for x in all_series}
         for n in range(len(pairs)):
@@ -551,9 +596,9 @@ class SlideUtils(Generic[TDf, TCol]):
                 return res.mask(nulls, None)
             return (res == 0).mask(nulls, None)
         else:
-            res = self.like(
-                self.to_series([col]), expr=expr, ignore_case=ignore_case
-            ).iloc[0]
+            res = self.series_to_array(
+                self.like(self.to_series([col]), expr=expr, ignore_case=ignore_case)
+            )[0]
             return None if pd.isna(res) else bool(res)
 
     def cols_to_df(self, cols: List[Any], names: Optional[List[str]] = None) -> TDf:
@@ -581,28 +626,38 @@ class SlideUtils(Generic[TDf, TCol]):
         """
         return len(df.index) == 0
 
-    def as_arrow(self, df: TDf, schema: Optional[pa.Schema] = None) -> pa.Table:
-        """Convert pandas like dataframe to pyarrow table
+    def as_arrow(self, df: TDf, schema: pa.Schema, type_safe: bool = True) -> pa.Table:
+        """Convert the dataframe to pyarrow table
 
         :param df: pandas like dataframe
         :param schema: if specified, it will be used to construct pyarrow table,
           defaults to None
+        :param type_safe: check for overflows or other unsafe conversions
         :return: pyarrow table
         """
-        return pa.Table.from_pandas(df, schema=schema, preserve_index=False, safe=False)
+        pdf = self.as_pandas(df)
+        return pa.Table.from_pandas(
+            pdf, schema=schema, preserve_index=False, safe=type_safe
+        )
+
+    def as_pandas(self, df: TDf) -> pd.DataFrame:
+        """Convert the dataframe to pandas dataframe
+
+        :return: the pandas dataframe
+        """
+        raise NotImplementedError  # pragma: no cover
 
     def as_array_iterable(
         self,
         df: TDf,
-        schema: Optional[pa.Schema] = None,
+        schema: pa.Schema,
         columns: Optional[List[str]] = None,
         type_safe: bool = False,
     ) -> Iterable[List[Any]]:
         """Convert pandas like dataframe to iterable of rows in the format of list.
 
         :param df: pandas like dataframe
-        :param schema: schema of the input. With None, it will infer the schema,
-          it can't infer wrong schema for nested types, so try to be explicit
+        :param schema: schema of the input
         :param columns: columns to output, None for all columns
         :param type_safe: whether to enforce the types in schema, if False, it will
             return the original values from the dataframe
@@ -614,8 +669,6 @@ class SlideUtils(Generic[TDf, TCol]):
         """
         if self.empty(df):
             return
-        if schema is None:
-            schema = self.to_schema(df)
         if columns is not None:
             df = df[columns]
             schema = pa.schema([schema.field(n) for n in columns])
@@ -623,7 +676,7 @@ class SlideUtils(Generic[TDf, TCol]):
             for arr in df.astype(object).itertuples(index=False, name=None):
                 yield list(arr)
         elif all(not pa.types.is_nested(x) for x in schema.types):
-            p = self.as_arrow(df, schema)
+            p = self.as_arrow(df, schema, type_safe)
             d = p.to_pydict()
             cols = [d[n] for n in schema.names]
             for arr in zip(*cols):
@@ -642,7 +695,7 @@ class SlideUtils(Generic[TDf, TCol]):
     def as_array(
         self,
         df: TDf,
-        schema: Optional[pa.Schema] = None,
+        schema,
         columns: Optional[List[str]] = None,
         type_safe: bool = False,
     ) -> List[List[Any]]:
@@ -669,28 +722,21 @@ class SlideUtils(Generic[TDf, TCol]):
         self.ensure_compatible(df)
         assert_or_throw(
             df.columns.dtype == "object",
-            ValueError("Pandas dataframe must have named schema"),
+            ValueError("Dataframe must have named schema"),
         )
 
         def get_fields() -> Iterable[pa.Field]:
-            if isinstance(df, pd.DataFrame) and len(df.index) > 0:
-                yield from pa.Schema.from_pandas(df, preserve_index=False)
-            else:
-                for i in range(df.shape[1]):
-                    tp = df.dtypes[i]
-                    if tp == np.dtype("object") or tp == np.dtype(str):
-                        t = pa.string()
-                    else:
-                        t = pa.from_numpy_dtype(tp)
-                    yield pa.field(df.columns[i], t)
+            for c in df.columns:
+                tp = df[c].dtype
+                if tp == np.dtype("object") or tp == np.dtype(str):
+                    t = pa.string()
+                else:
+                    t = self.to_safe_pa_type(tp)
+                    if pa.types.is_timestamp(t):
+                        t = TRIAD_DEFAULT_TIMESTAMP
+                yield pa.field(c, t)
 
-        fields: List[pa.Field] = []
-        for field in get_fields():
-            if pa.types.is_timestamp(field.type):
-                fields.append(pa.field(field.name, TRIAD_DEFAULT_TIMESTAMP))
-            else:
-                fields.append(field)
-        return pa.schema(fields)
+        return pa.schema(list(get_fields()))
 
     def cast_df(  # noqa: C901
         self, df: TDf, schema: pa.Schema, input_schema: Optional[pa.Schema] = None
@@ -723,6 +769,7 @@ class SlideUtils(Generic[TDf, TCol]):
         df: TDf,
         cols: List[str],
         func: Callable[[TDf], TDf],
+        output_schema: Optional[pa.Schema] = None,
         **kwargs: Any,
     ) -> TDf:
         """Safe groupby apply operation on pandas like dataframes.
@@ -732,6 +779,7 @@ class SlideUtils(Generic[TDf, TCol]):
         :param df: pandas like dataframe
         :param cols: columns to group on, can be empty
         :param func: apply function, df in, df out
+        :param output_schema: output schema hint for the apply
         :return: output dataframe
 
         .. note::
@@ -758,19 +806,23 @@ class SlideUtils(Generic[TDf, TCol]):
         :raises ValueError: if not compatible
         """
         if df.index.name is not None:
-            raise ValueError("pandas like datafame index can't have name")
+            raise SlideIndexIncompatibleError(
+                "pandas like datafame index can't have name"
+            )
         if self.is_compatile_index(df):
             return
         if self.empty(df):
             return
-        raise ValueError(
+        raise SlideIndexIncompatibleError(
             f"pandas like datafame must have default index, but got {type(df.index)}"
         )
 
     def drop_duplicates(self, df: TDf) -> TDf:
         """Select distinct rows from dataframe
 
-        :param df: the dataframe
+            raise SlideIndexIncompatibleError(
+                "pandas like datafame index can't have name"
+            )
         :return: the result with only distinct rows
         """
         return df.drop_duplicates(ignore_index=True)
@@ -784,7 +836,7 @@ class SlideUtils(Generic[TDf, TCol]):
         :return: unioned dataframe
         """
         ndf1, ndf2 = self._preprocess_set_op(df1, df2)
-        ndf = ndf1.append(ndf2, ignore_index=True)
+        ndf = ndf1.append(ndf2)
         if unique:
             ndf = self.drop_duplicates(ndf)
         return ndf
@@ -975,7 +1027,7 @@ class SlideUtils(Generic[TDf, TCol]):
         def _convert_int_like() -> TCol:
             nulls = col.isnull()
             tp = to_single_pandas_dtype(
-                to_pa_datatype(safe_dtype), use_extension_types=False
+                self.to_safe_pa_type(safe_dtype), use_extension_types=False
             )
             return col.fillna(0).astype(tp).astype(safe_dtype).mask(nulls, pd.NA)
 
@@ -991,7 +1043,7 @@ class SlideUtils(Generic[TDf, TCol]):
         elif pa.types.is_floating(from_type):
             nulls = col.isnull()
             tp = to_single_pandas_dtype(
-                to_pa_datatype(safe_dtype), use_extension_types=False
+                self.to_safe_pa_type(safe_dtype), use_extension_types=False
             )
             return col.fillna(0).astype(tp).astype(safe_dtype).mask(nulls, pd.NA)
         elif pa.types.is_string(from_type):  # integer string representations
@@ -999,7 +1051,7 @@ class SlideUtils(Generic[TDf, TCol]):
             temp = col.astype(np.float64)
             nulls = temp.isnull()
             tp = to_single_pandas_dtype(
-                to_pa_datatype(safe_dtype), use_extension_types=False
+                self.to_safe_pa_type(safe_dtype), use_extension_types=False
             )
             return temp.fillna(0).astype(tp).astype(safe_dtype).mask(nulls, pd.NA)
         raise SlideCastError(f"unable to cast from {from_type} to {safe_dtype}")

@@ -14,3 +14,9 @@ class SlideCastError(SlideException):
     """Type casting exception"""
 
     pass
+
+
+class SlideIndexIncompatibleError(SlideException):
+    """Dataframe index incompatible exception"""
+
+    pass

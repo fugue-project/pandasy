@@ -34,7 +34,7 @@ setup(
     extras_require={
         "dask": ["dask[dataframe]", "cloudpickle>=1.4.0"],
         "ray": ["pandas>=1.1.2", "modin[ray]>=0.8.1.1"],
-        "all": ["dask[dataframe]", "cloudpickle>=1.4.0", "modin[ray]"],
+        "all": ["dask[dataframe]", "cloudpickle>=1.4.0"],
         "test": ["duckdb"],
     },
     classifiers=[

@@ -31,3 +31,9 @@ package:
 
 test:
 	python3 -bb -m pytest tests/
+
+testpandas:
+	python3 -bb -m pytest tests/slide_pandas
+
+testdask:
+	python3 -bb -m pytest tests/slide_dask

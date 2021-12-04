@@ -4,11 +4,11 @@ from typing import Any, Callable, Dict, List, Optional
 import numpy as np
 import pandas as pd
 import pyarrow as pa
+from pandas.api.types import is_object_dtype
 from slide.exceptions import SlideInvalidOperation
 from slide.utils import SlideUtils
 from triad.utils.assertion import assert_or_throw
-from triad.utils.pyarrow import to_pa_datatype
-from pandas.api.types import is_object_dtype
+from triad.utils.pyarrow import TRIAD_DEFAULT_TIMESTAMP
 
 _KEY_COL_NAME = "__safe_groupby_key__"
 _DEFAULT_DATETIME = datetime(2000, 1, 1)
@@ -28,6 +28,9 @@ class PandasUtils(SlideUtils[pd.DataFrame, pd.Series]):
         if isinstance(obj, (np.ndarray, list)):
             return pd.Series(obj, name=name)
         raise NotImplementedError  # pragma: no cover
+
+    def series_to_array(self, col: pd.Series) -> List[Any]:
+        return col.tolist()
 
     def to_constant_series(
         self,
@@ -49,11 +52,33 @@ class PandasUtils(SlideUtils[pd.DataFrame, pd.Series]):
             return pd.DataFrame({c.name: c for c in cols})
         return pd.DataFrame(dict(zip(names, cols)))
 
+    def as_pandas(self, df: pd.DataFrame) -> pd.DataFrame:
+        return df
+
+    def to_schema(self, df: pd.DataFrame) -> pa.Schema:
+        if len(df.index) == 0:
+            return super().to_schema(df)
+
+        self.ensure_compatible(df)
+        assert_or_throw(
+            df.columns.dtype == "object",
+            ValueError("Pandas dataframe must have named schema"),
+        )
+
+        fields: List[pa.Field] = []
+        for field in pa.Schema.from_pandas(df, preserve_index=False):
+            if pa.types.is_timestamp(field.type):
+                fields.append(pa.field(field.name, TRIAD_DEFAULT_TIMESTAMP))
+            else:
+                fields.append(field)
+        return pa.schema(fields)
+
     def sql_groupby_apply(
         self,
         df: pd.DataFrame,
         cols: List[str],
         func: Callable[[pd.DataFrame], pd.DataFrame],
+        output_schema: Optional[pa.Schema] = None,
         **kwargs: Any,
     ) -> pd.DataFrame:
         if pd.__version__ < "1.2":  # pragma: no cover
@@ -64,7 +89,7 @@ class PandasUtils(SlideUtils[pd.DataFrame, pd.Series]):
             return func(df)
         return (
             df.groupby(cols, dropna=False)
-            .apply(lambda df: func(df.reset_index(drop=True)), **kwargs)
+            .apply(lambda tdf: func(tdf.reset_index(drop=True)), **kwargs)
             .reset_index(drop=True)
         )
 
@@ -81,7 +106,7 @@ class PandasUtils(SlideUtils[pd.DataFrame, pd.Series]):
         def _fillna_default(col: Any) -> Any:
             if is_object_dtype(col.dtype):
                 return col.fillna(0)
-            ptype = to_pa_datatype(col.dtype)
+            ptype = self.to_safe_pa_type(col.dtype)
             if pa.types.is_timestamp(ptype) or pa.types.is_date(ptype):
                 return col.fillna(_DEFAULT_DATETIME)
             if pa.types.is_string(ptype):  # pragma: no cover
