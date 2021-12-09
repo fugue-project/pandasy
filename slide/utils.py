@@ -16,9 +16,9 @@ import pyarrow as pa
 from triad.utils.assertion import assert_or_throw
 from triad.utils.pyarrow import (
     TRIAD_DEFAULT_TIMESTAMP,
-    apply_schema,
     to_pa_datatype,
     to_single_pandas_dtype,
+    _TypeConverter,
 )
 
 from slide._string_utils import LikeExpr, LikeExprShortcut
@@ -262,27 +262,49 @@ class SlideUtils(Generic[TDf, TCol]):
         nulls or strings, where the pandas dtype may not provide the accurate
         type information.
         """
-        to_type = self.to_safe_pa_type(type_obj)
-        t_type = to_single_pandas_dtype(to_type, use_extension_types=True)
         try:
             if self.is_series(col):
-                try:
-                    inf_type = self.get_col_pa_type(col)
-                    has_hint = input_type is not None
-                    from_type = (
-                        inf_type if not has_hint else self.to_safe_pa_type(input_type)
+                to_type = self.to_safe_pa_type(type_obj)
+                input_pa_type = (
+                    None if input_type is None else self.to_safe_pa_type(input_type)
+                )
+                if (  # nested/binary as input/output
+                    pa.types.is_nested(to_type)
+                    or pa.types.is_binary(to_type)
+                    or (
+                        input_pa_type is not None
+                        and (
+                            pa.types.is_nested(input_pa_type)
+                            or pa.types.is_binary(input_pa_type)
+                        )
                     )
-                    if pa.types.is_string(to_type):
-                        if (
-                            has_hint
-                            and pa.types.is_string(from_type)
-                            and pa.types.is_string(inf_type)
-                        ):
-                            return col
-                    elif from_type == inf_type == to_type:
+                ):
+                    assert_or_throw(
+                        pd.api.types.is_object_dtype(col.dtype),
+                        SlideCastError(f"unexpected column type {col.dtype}"),
+                    )
+                    assert_or_throw(
+                        input_type is None
+                        or self.to_safe_pa_type(input_type) == to_type,
+                        SlideCastError(f"unexpected column type hint {input_type}"),
+                    )
+                    return col
+
+                t_type = to_single_pandas_dtype(to_type, use_extension_types=True)
+                inf_type = self.get_col_pa_type(col)
+                has_hint = input_type is not None
+                from_type = input_pa_type or inf_type
+
+                if pa.types.is_string(to_type):
+                    if (
+                        has_hint
+                        and pa.types.is_string(from_type)
+                        and pa.types.is_string(inf_type)
+                    ):
                         return col
-                except Exception:  # pragma: no cover
-                    return col.astype(t_type)
+                elif from_type == inf_type == to_type:
+                    return col
+
                 if pa.types.is_boolean(to_type):
                     return self._cast_to_bool(col, from_type, inf_type, t_type)
                 if pa.types.is_integer(to_type):
@@ -295,7 +317,7 @@ class SlideUtils(Generic[TDf, TCol]):
                     return self._cast_to_date(col, from_type, inf_type, t_type)
                 elif pa.types.is_string(to_type):
                     return self._cast_to_str(col, from_type, inf_type, t_type)
-                return col.astype(t_type)
+                return col.astype(t_type)  # pragma: no cover
             else:
                 if col is None:
                     return None
@@ -313,7 +335,7 @@ class SlideUtils(Generic[TDf, TCol]):
                     return None
                 return res
         except (TypeError, ValueError) as te:
-            raise SlideCastError(f"unable to cast from {from_type} to {t_type}") from te
+            raise SlideCastError(str(te)) from te
 
     def filter_df(self, df: TDf, cond: Any) -> TDf:
         """Filter dataframe by a boolean series or a constant
@@ -645,63 +667,23 @@ class SlideUtils(Generic[TDf, TCol]):
         """
         raise NotImplementedError  # pragma: no cover
 
-    def as_array_iterable(
+    def create_native_converter(
         self,
-        df: TDf,
-        schema: pa.Schema,
-        columns: Optional[List[str]] = None,
-        type_safe: bool = False,
-    ) -> Iterable[List[Any]]:
-        """Convert pandas like dataframe to iterable of rows in the format of list.
+        input_schema: pa.Schema,
+        type_safe: bool,
+    ) -> "SlideDataFrameNativeConverter":
+        """Create a converter that convert the dataframes into python native iterables
 
-        :param df: pandas like dataframe
-        :param schema: schema of the input
-        :param columns: columns to output, None for all columns
+        :param input_schema: schema of the input dataframe
         :param type_safe: whether to enforce the types in schema, if False, it will
-            return the original values from the dataframe
-        :return: iterable of rows, each row is a list
+            return the original values from the dataframes
+        :return: the converter
 
-        .. note::
+        .. tip::
 
-        If there are nested types in schema, the conversion can be slower
+        This converter can be reused on multiple dataframes with the same structure
         """
-        if self.empty(df):
-            return
-        if columns is not None:
-            df = df[columns]
-            schema = pa.schema([schema.field(n) for n in columns])
-        if not type_safe:
-            for arr in df.astype(object).itertuples(index=False, name=None):
-                yield list(arr)
-        elif all(not pa.types.is_nested(x) for x in schema.types):
-            p = self.as_arrow(df, schema, type_safe)
-            d = p.to_pydict()
-            cols = [d[n] for n in schema.names]
-            for arr in zip(*cols):
-                yield list(arr)
-        else:
-            # If schema has nested types, the conversion will be much slower
-            for arr in apply_schema(
-                schema,
-                df.itertuples(index=False, name=None),
-                copy=True,
-                deep=True,
-                str_as_json=True,
-            ):
-                yield arr
-
-    def as_array(
-        self,
-        df: TDf,
-        schema,
-        columns: Optional[List[str]] = None,
-        type_safe: bool = False,
-    ) -> List[List[Any]]:
-        return list(
-            self.as_array_iterable(
-                df, schema=schema, columns=columns, type_safe=type_safe
-            )
-        )
+        return SlideDataFrameNativeConverter(self, input_schema, type_safe)
 
     def to_schema(self, df: TDf) -> pa.Schema:
         """Extract pandas dataframe schema as pyarrow schema. This is a replacement
@@ -1120,3 +1102,190 @@ class SlideUtils(Generic[TDf, TCol]):
         if pd.__version__ < "1.2":  # pragma: no cover
             return col.astype(safe_dtype).dt.floor("D")
         return col.astype(safe_dtype).dt.date
+
+
+class SlideDataFrameNativeConverter:
+    def __init__(
+        self,
+        utils: SlideUtils,
+        schema: pa.Schema,
+        type_safe: bool,
+    ):
+        """Convert pandas like dataframe to iterable of rows in the format of list.
+
+        :param utils: the associated SlideUtils
+        :param schema: schema of the input dataframe
+        :param type_safe: whether to enforce the types in schema, if False, it will
+            return the original values from the dataframes
+
+        .. note::
+
+        If there are nested types in schema, the conversion can be slower
+        """
+        self._utils = utils
+        self._schema = schema
+        self._has_time = any(
+            pa.types.is_timestamp(x) or pa.types.is_date(x) for x in schema.types
+        )
+        if not type_safe:
+            self._as_array_iterable = self._as_array_iterable_not_type_safe
+            self._as_arrays = self._as_arrays_not_type_safe
+            self._as_dict_iterable = self._as_dict_iterable_not_type_safe
+            self._as_dicts = self._as_dicts_not_type_safe
+        else:
+            self._split_nested(self._schema)
+            if self._converter is None:
+                self._as_array_iterable = self._as_array_iterable_simple
+                self._as_arrays = self._as_arrays_simple
+                self._as_dict_iterable = self._as_dict_iterable_simple
+                self._as_dicts = self._as_dicts_simple
+            elif self._simple_part is None:
+                self._as_array_iterable = self._as_array_iterable_nested
+                self._as_arrays = self._as_arrays_nested
+                self._as_dict_iterable = self._as_dict_iterable_nested
+                self._as_dicts = self._as_dicts_nested
+            else:
+                self._as_array_iterable = self._as_array_iterable_hybrid
+                self._as_arrays = self._as_arrays_hybrid
+                self._as_dict_iterable = self._as_dict_iterable_hybrid
+                self._as_dicts = self._as_dicts_hybrid
+        pass
+
+    def as_array_iterable(self, df: Any) -> Iterable[List[Any]]:
+        """Convert the dataframe to an iterable of rows in the format of list.
+
+        :param df: the dataframe
+        :return: an iterable of rows, each row is a list
+        """
+        return self._as_array_iterable(df)
+
+    def as_arrays(self, df: Any) -> List[List[Any]]:
+        """Convert the dataframe to a list of rows in the format of list.
+
+        :param df: the dataframe
+        :return: a list of rows, each row is a list
+        """
+        return self._as_arrays(df)
+
+    def as_dict_iterable(self, df: Any) -> Iterable[Dict[str, Any]]:
+        """Convert the dataframe to an iterable of rows in the format of dict.
+
+        :param df: the dataframe
+        :return: an iterable of rows, each row is a dict
+        """
+        return self._as_dict_iterable(df)
+
+    def as_dicts(self, df: Any) -> List[Dict[str, Any]]:
+        """Convert the dataframe to a list of rows in the format of dict.
+
+        :param df: the dataframe
+        :return: a list of rows, each row is a dict
+        """
+        return self._as_dicts(df)
+
+    def _time_safe(self, df: Any) -> Any:
+        return df.astype(object) if self._has_time else df
+
+    def _as_array_iterable_not_type_safe(self, df: Any) -> Iterable[List[Any]]:
+        for arr in self._time_safe(df).itertuples(index=False, name=None):
+            yield list(arr)
+
+    def _as_arrays_not_type_safe(self, df: Any) -> List[List[Any]]:
+        return self._time_safe(self._utils.as_pandas(df)).values.tolist()
+
+    def _as_dict_iterable_not_type_safe(self, df: Any) -> Iterable[Dict[str, Any]]:
+        names = list(self._schema.names)
+        for arr in self._time_safe(df).itertuples(index=False, name=None):
+            yield dict(zip(names, arr))
+
+    def _as_dicts_not_type_safe(self, df: Any) -> List[Dict[str, Any]]:
+        return self._time_safe(self._utils.as_pandas(df)).to_dict("records")
+
+    def _as_array_iterable_simple(self, df: Any) -> Iterable[List[Any]]:
+        return self._get_arrow_arrays_simple(df, self._schema)
+
+    def _as_arrays_simple(self, df: Any) -> List[List[Any]]:
+        return list(self._get_arrow_arrays_simple(df, self._schema))
+
+    def _as_dict_iterable_simple(self, df: Any) -> Iterable[Dict[str, Any]]:
+        for arr in self._get_arrow_arrays_simple(df, self._schema):
+            yield dict(zip(self._schema.names, arr))
+
+    def _as_dicts_simple(self, df: Any) -> List[Dict[str, Any]]:
+        return list(self._as_dict_iterable_simple(df))
+
+    def _as_array_iterable_hybrid(self, df: Any) -> Iterable[List[Any]]:
+        for arr1, arr2 in zip(self._simple_part(df), self._nested_part(df)):
+            yield self._remap_arrs(arr1, arr2)
+
+    def _as_arrays_hybrid(self, df: Any) -> List[List[Any]]:
+        return list(self._as_array_iterable_hybrid(df))
+
+    def _as_dict_iterable_hybrid(self, df: Any) -> Iterable[Dict[str, Any]]:
+        names = list(self._schema.names)
+        for arr in self._as_array_iterable_hybrid(df):
+            yield dict(zip(names, arr))
+
+    def _as_dicts_hybrid(self, df: Any) -> List[Dict[str, Any]]:
+        return list(self._as_dict_iterable_hybrid(df))
+
+    def _as_array_iterable_nested(self, df: Any) -> Iterable[List[Any]]:
+        return self._nested_part(df)
+
+    def _as_arrays_nested(self, df: Any) -> List[List[Any]]:
+        return list(self._nested_part(df))
+
+    def _as_dict_iterable_nested(self, df: Any) -> Iterable[Dict[str, Any]]:
+        names = list(self._schema.names)
+        for arr in self._nested_part(df):
+            yield dict(zip(names, arr))
+
+    def _as_dicts_nested(self, df: Any) -> List[Dict[str, Any]]:
+        return list(self._as_dict_iterable_nested(df))
+
+    def _split_nested(self, schema: pa.Schema) -> None:
+        cols1: List[pa.Field] = []
+        cols2: List[pa.Field] = []
+        self._remap: List[Tuple[int, int]] = []
+        for field in schema:
+            if pa.types.is_nested(field.type):
+                self._remap.append((1, len(cols2)))
+                cols2.append(field)
+            else:
+                self._remap.append((0, len(cols1)))
+                cols1.append(field)
+        self._simple_schema = pa.schema(cols1)
+        self._simple_part: Any = (
+            None
+            if len(cols1) == 0
+            else lambda df: self._get_arrow_arrays_simple(
+                df[self._simple_schema.names], self._simple_schema
+            )
+        )
+        self._nested_schema = pa.schema(cols2)
+        self._converter: Any = (
+            None
+            if len(cols2) == 0
+            else _TypeConverter(
+                pa.schema(cols2), copy=True, deep=True, str_as_json=True
+            )
+        )
+        self._nested_part = lambda df: self._get_arrays_nested(
+            df[self._nested_schema.names], self._nested_schema
+        )
+
+    def _remap_arrs(self, *arrs: List[List[Any]]) -> List[Any]:
+        return [arrs[x[0]][x[1]] for x in self._remap]
+
+    def _get_arrow_arrays_simple(
+        self, df: Any, schema: pa.Schema
+    ) -> Iterable[List[Any]]:
+        p = self._utils.as_arrow(df, schema, True)
+        d = p.to_pydict()
+        cols = [d[n] for n in schema.names]
+        for arr in zip(*cols):
+            yield list(arr)
+
+    def _get_arrays_nested(self, df: Any, schema: pa.Schema) -> Iterable[List[Any]]:
+        for item in df.itertuples(index=False, name=None):
+            yield self._converter.row_to_py(item)
