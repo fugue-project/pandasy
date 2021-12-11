@@ -1816,7 +1816,8 @@ class SlideTestSuite(object):
             pdf = pd.DataFrame(dict(a=[None, b"\0abc"]))
 
             schema = Schema("a:binary").pa_schema
-            df = self.to_df(pdf, "a:binary")
+            coerce = pd.__version__ >= "1.2"
+            df = self.to_df(pdf, "a:binary", coerce=coerce)
             df["h"] = self.utils.cast(df.a, schema[0].type)
 
             assert [[None], [b"\0abc"]] == self.to_pd(df[["h"]]).values.tolist()

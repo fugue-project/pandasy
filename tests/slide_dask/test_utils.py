@@ -22,20 +22,25 @@ class DaskTests(SlideTestSuite.Tests):
         columns: Any = None,
         coerce: bool = True,
     ):
+        def _get_pdf(df: pd.DataFrame) -> pd.DataFrame:
+            if coerce:
+                return df.convert_dtypes()
+            return df
+
         if isinstance(columns, str):
             s = expression_to_schema(columns)
             df = dd.from_pandas(
-                pd.DataFrame(data, columns=s.names).convert_dtypes(), npartitions=2
+                _get_pdf(pd.DataFrame(data, columns=s.names)), npartitions=2
             )
             if coerce:
                 df = self.utils.cast_df(df, s)
             return df
         elif isinstance(data, list):
             return dd.from_pandas(
-                pd.DataFrame(data, columns=columns).convert_dtypes(), npartitions=2
+                _get_pdf(pd.DataFrame(data, columns=columns)), npartitions=2
             )
         elif isinstance(data, pd.DataFrame):
-            return dd.from_pandas(data.convert_dtypes(), npartitions=2)
+            return dd.from_pandas(_get_pdf(data), npartitions=2)
         elif isinstance(data, dd.DataFrame):
             return data
         raise NotImplementedError
