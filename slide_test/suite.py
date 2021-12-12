@@ -92,15 +92,44 @@ class SlideTestSuite(object):
                 pd.DataFrame(dict(x=[0, 1], y=[2, 3], z=[4, 5], w=[2, 3])),
             )
 
-        def test_to_constant_series(self):
+        def test_scalar_to_series(self):
             s = self.utils.to_series(pd.Series([0, 1], name="x"))
-            s1 = self.utils.to_constant_series("a", s, name="y")
-            s2 = self.utils.to_constant_series(None, s, name="z", dtype="float64")
+            s1 = self.utils.scalar_to_series("a", s, name="y")
+            s2 = self.utils.scalar_to_series(None, s, name="z", dtype="float64")
             df = self.utils.cols_to_df([s, s1, s2])
             assert_pdf_eq(
                 self.to_pd(df),
                 pd.DataFrame(dict(x=[0, 1], y=["a", "a"], z=[None, None])),
             )
+
+            s = self.to_df(pd.DataFrame(dict(x=pd.Series([0, 1]))))
+            s1 = self.utils.scalar_to_series("a", s, name="y")
+            s2 = self.utils.scalar_to_series(None, s, name="z", dtype="float64")
+            df = self.utils.cols_to_df([s1, s2])
+            assert_pdf_eq(
+                self.to_pd(df),
+                pd.DataFrame(dict(y=["a", "a"], z=[None, None])),
+            )
+
+            s = self.utils.to_series(pd.Series([0, 1], name="x"))
+            s1 = self.utils.scalar_to_series({"x": 1}, s, name="y")
+            s2 = self.utils.scalar_to_series(
+                [1, 2], s, name="z", dtype=np.dtype(object)
+            )
+            df = self.utils.cols_to_df([s1, s2])
+            assert [[{"x": 1}, [1, 2]], [{"x": 1}, [1, 2]]] == self.to_pd(
+                df
+            ).values.tolist()
+
+            s = self.to_df(pd.DataFrame(dict(x=pd.Series([0, 1]))))
+            s1 = self.utils.scalar_to_series(
+                {"x": 1}, s, name="y", dtype=np.dtype(object)
+            )
+            s2 = self.utils.scalar_to_series([1, 2], s, name="z")
+            df = self.utils.cols_to_df([s1, s2])
+            assert [[{"x": 1}, [1, 2]], [{"x": 1}, [1, 2]]] == self.to_pd(
+                df
+            ).values.tolist()
 
         def test_get_col_pa_type(self):
             df = self.to_df(
@@ -1115,7 +1144,7 @@ class SlideTestSuite(object):
                 check_order=False,
             )
 
-        def test_cast_constant(self):
+        def test_cast_scalar(self):
             assert self.utils.cast(None, bool) is None
             assert self.utils.cast(True, bool)
             assert not self.utils.cast(False, bool)
@@ -1884,6 +1913,25 @@ class SlideTestSuite(object):
 
             with raises(SlideInvalidOperation):
                 res = self.utils.cols_to_df([123, 456], names=["x", "y"])
+
+            res = self.utils.cols_to_df([123, 456], names=["x", "y"], reference=df)
+            assert_pdf_eq(
+                self.to_pd(res), self.to_pd(self.to_df([[123, 456]], "x:long,y:long"))
+            )
+
+            # has nested type, all scalars
+            res = self.utils.cols_to_df([[1, 2], 456], names=["x", "y"], reference=df)
+            assert [[[1, 2], 456]] == self.to_pd(res).values.tolist()
+
+            res = self.utils.cols_to_df([456, [1, 2]], names=["x", "y"], reference=df)
+            assert [[456, [1, 2]]] == self.to_pd(res).values.tolist()
+
+            # has nested type, and series
+            res = self.utils.cols_to_df([[1, 2], df["a"]], names=["x", "y"])
+            assert [[[1, 2], "a"]] == self.to_pd(res).values.tolist()
+
+            res = self.utils.cols_to_df([df["a"], [1, 2]], names=["x", "y"])
+            assert [["a", [1, 2]]] == self.to_pd(res).values.tolist()
 
         def test_to_schema(self):
             df = self.to_df([[1.0, 2], [2.0, 3]])

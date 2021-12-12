@@ -8,6 +8,7 @@ from typing import (
     Optional,
     Tuple,
     TypeVar,
+    Union,
 )
 
 import numpy as np
@@ -102,17 +103,17 @@ class SlideUtils(Generic[TDf, TCol]):
         """
         raise NotImplementedError  # pragma: no cover
 
-    def to_constant_series(
+    def scalar_to_series(
         self,
-        constant: Any,
-        from_series: TCol,
+        scalar: Any,
+        reference: Union[TCol, TDf],
         dtype: Any = None,
         name: Optional[str] = None,
     ) -> TCol:  # pragma: no cover
-        """Convert a constant to a series with the same index of ``from_series``
+        """Convert a scalar to a series with the same index of ``reference``
 
-        :param constant: the constant
-        :param from_series: the reference series for index
+        :param scalar: the scalar
+        :param reference: the reference series or dataframe for index
         :param dtype: default data type, defaults to None
         :param name: name of the series, defaults to None
         :return: the series
@@ -120,9 +121,9 @@ class SlideUtils(Generic[TDf, TCol]):
         raise NotImplementedError
 
     def get_col_pa_type(self, col: Any) -> pa.DataType:
-        """Get column or constant pyarrow data type
+        """Get column or scalar pyarrow data type
 
-        :param col: the column or the constant
+        :param col: the column or the scalar
         :return: pyarrow data type
         """
         if self.is_series(col):
@@ -133,11 +134,11 @@ class SlideUtils(Generic[TDf, TCol]):
         return self.to_safe_pa_type(type(col))
 
     def unary_arithmetic_op(self, col: Any, op: str) -> Any:
-        """Unary arithmetic operator on series/constants
+        """Unary arithmetic operator on series/scalars
 
-        :param col: a series or a constant
+        :param col: a series or a scalar
         :param op: can be ``+`` or ``-``
-        :return: the transformed series or constant
+        :return: the transformed series or scalar
         :raises NotImplementedError: if ``op`` is not supported
 
         .. note:
@@ -153,10 +154,10 @@ class SlideUtils(Generic[TDf, TCol]):
     def binary_arithmetic_op(self, col1: Any, col2: Any, op: str) -> Any:
         """Binary arithmetic operations ``+``, ``-``, ``*``, ``/``
 
-        :param col1: the first column (series or constant)
-        :param col2: the second column (series or constant)
+        :param col1: the first column (series or scalar)
+        :param col2: the second column (series or scalar)
         :param op: ``+``, ``-``, ``*``, ``/``
-        :return: the result after the operation (series or constant)
+        :return: the result after the operation (series or scalar)
         :raises NotImplementedError: if ``op`` is not supported
 
         .. note:
@@ -176,10 +177,10 @@ class SlideUtils(Generic[TDf, TCol]):
     def comparison_op(self, col1: Any, col2: Any, op: str) -> Any:
         """Binary comparison ``<``, ``<=``, ``==``, ``>``, ``>=``
 
-        :param col1: the first column (series or constant)
-        :param col2: the second column (series or constant)
+        :param col1: the first column (series or scalar)
+        :param col2: the second column (series or scalar)
         :param op: ``<``, ``<=``, ``==``, ``>``, ``>=``
-        :return: the result after the operation (series or constant)
+        :return: the result after the operation (series or scalar)
         :raises NotImplementedError: if ``op`` is not supported
 
         .. note:
@@ -208,10 +209,10 @@ class SlideUtils(Generic[TDf, TCol]):
     def binary_logical_op(self, col1: Any, col2: Any, op: str) -> Any:
         """Binary logical operations ``and``, ``or``
 
-        :param col1: the first column (series or constant)
-        :param col2: the second column (series or constant)
+        :param col1: the first column (series or scalar)
+        :param col2: the second column (series or scalar)
         :param op: ``and``, ``or``
-        :return: the result after the operation (series or constant)
+        :return: the result after the operation (series or scalar)
         :raises NotImplementedError: if ``op`` is not supported
 
         .. note:
@@ -248,12 +249,12 @@ class SlideUtils(Generic[TDf, TCol]):
         """Cast ``col`` to a new type. ``type_obj`` must be
         able to be converted by :func:`~triad.utils.pyarrow.self.to_safe_pa_type`.
 
-        :param col: a series or a constant
+        :param col: a series or a scalar
         :param type_obj: an objected that can be accepted by
             :func:`~triad.utils.pyarrow.self.to_safe_pa_type`
         :param input_type: an objected that is either None or to be accepted by
             :func:`~triad.utils.pyarrow.self.to_safe_pa_type`, defaults to None.
-        :return: the new column or constant
+        :return: the new column or scalar
 
         .. note:
 
@@ -338,10 +339,10 @@ class SlideUtils(Generic[TDf, TCol]):
             raise SlideCastError(str(te)) from te
 
     def filter_df(self, df: TDf, cond: Any) -> TDf:
-        """Filter dataframe by a boolean series or a constant
+        """Filter dataframe by a boolean series or a scalar
 
         :param df: the dataframe
-        :param cond: a boolean seris or a constant
+        :param cond: a boolean seris or a scalar
         :return: the filtered dataframe
 
         .. note:
@@ -357,9 +358,9 @@ class SlideUtils(Generic[TDf, TCol]):
             return df.head(0)
 
     def is_value(self, col: Any, value: Any, positive: bool = True) -> Any:
-        """Check if the series or constant is ``value``
+        """Check if the series or scalar is ``value``
 
-        :param col: the series or constant
+        :param col: the series or scalar
         :param value: ``None``, ``True`` or ``False``
         :param positive: check ``is value`` or ``is not value``,
             defaults to True (``is value``)
@@ -389,12 +390,12 @@ class SlideUtils(Generic[TDf, TCol]):
             )[0]
 
     def is_in(self, col: Any, values: List[Any], positive: bool) -> Any:  # noqa: C901
-        """Check if a series or a constant is in ``values``
+        """Check if a series or a scalar is in ``values``
 
-        :param col: the series or the constant
-        :param values: a list of constants and series (can mix)
+        :param col: the series or the scalar
+        :param values: a list of scalars and series (can mix)
         :param positive: ``is in`` or ``is not in``
-        :return: the correspondent boolean series or constant
+        :return: the correspondent boolean series or scalar
 
         .. note:
 
@@ -404,13 +405,13 @@ class SlideUtils(Generic[TDf, TCol]):
         if self.is_series(col):
             cols = [x for x in values if self.is_series(x)]
             others = [x for x in values if not self.is_series(x)]
-            has_null_constant = any(pd.isna(x) for x in others)
+            has_null = any(pd.isna(x) for x in others)
             innulls: Any = None
             if positive:
                 o: Any = col.isin(others)
                 for c in cols:
                     o = o | (col == c)
-                    if not has_null_constant:
+                    if not has_null:
                         if innulls is None:
                             innulls = c.isnull()
                         else:
@@ -419,12 +420,12 @@ class SlideUtils(Generic[TDf, TCol]):
                 o = ~col.isin(others)
                 for c in cols:
                     o = o & (col != c)
-                    if not has_null_constant:
+                    if not has_null:
                         if innulls is None:
                             innulls = c.isnull()
                         else:
                             innulls = innulls | c.isnull()
-            if has_null_constant:
+            if has_null:
                 o = o.mask(o == (0 if positive else 1), None)
             elif innulls is not None:
                 o = o.mask(innulls & (o == (0 if positive else 1)), None)
@@ -436,13 +437,13 @@ class SlideUtils(Generic[TDf, TCol]):
             return None if pd.isna(res) else bool(res)
 
     def is_between(self, col: Any, lower: Any, upper: Any, positive: bool) -> Any:
-        """Check if a series or a constant is ``>=lower`` and ``<=upper``
+        """Check if a series or a scalar is ``>=lower`` and ``<=upper``
 
-        :param col: the series or the constant
-        :param lower: the lower bound, which can be series or a constant
-        :param upper: the upper bound, which can be series or a constant
+        :param col: the series or the scalar
+        :param lower: the lower bound, which can be series or a scalar
+        :param upper: the upper bound, which can be series or a scalar
         :param positive: ``is between`` or ``is not between``
-        :return: the correspondent boolean series or constant
+        :return: the correspondent boolean series or scalar
 
         .. note:
 
@@ -453,12 +454,12 @@ class SlideUtils(Generic[TDf, TCol]):
             return None
         if self.is_series(col):
             left = (
-                self.to_constant_series(False, col)
+                self.scalar_to_series(False, col)
                 if lower is None
                 else (lower <= col).fillna(False)
             )
             right = (
-                self.to_constant_series(False, col)
+                self.scalar_to_series(False, col)
                 if upper is None
                 else (col <= upper).fillna(False)
             )
@@ -490,10 +491,10 @@ class SlideUtils(Generic[TDf, TCol]):
             return None if pd.isna(res) else bool(res)
 
     def coalesce(self, cols: List[Any]) -> Any:
-        """Coalesce multiple series and constants
+        """Coalesce multiple series and scalars
 
-        :param cols: the collection of series and constants in order
-        :return: the coalesced series or constant
+        :param cols: the collection of series and scalars in order
+        :return: the coalesced series or scalar
 
         .. note:
 
@@ -511,10 +512,10 @@ class SlideUtils(Generic[TDf, TCol]):
         """SQL ``CASE WHEN``
 
         :param pairs: condition and value pairs, both can be either a
-            series or a constant
+            series or a scalar
         :param default: default value if none of the conditions satisfies,
             defaults to None
-        :return: the final series or constant
+        :return: the final series or scalar
 
         .. note:
 
@@ -555,11 +556,11 @@ class SlideUtils(Generic[TDf, TCol]):
     ) -> Any:
         """SQL ``LIKE``
 
-        :param col: a series or a constant
+        :param col: a series or a scalar
         :param expr: a pattern expression
         :param ignore_case: whether to ignore case, defaults to False
         :param positive: ``LIKE`` or ``NOT LIKE``, defaults to True
-        :return: the correspondent boolean series or constant
+        :return: the correspondent boolean series or scalar
 
         .. note:
 
@@ -609,7 +610,7 @@ class SlideUtils(Generic[TDf, TCol]):
 
         if self.is_series(col):
             if expr is None:
-                return self.to_constant_series(float("nan"), col)
+                return self.scalar_to_series(float("nan"), col)
             nulls = col.isnull()
             res = like_series(col)
             if positive:
@@ -621,12 +622,19 @@ class SlideUtils(Generic[TDf, TCol]):
             )[0]
             return None if pd.isna(res) else bool(res)
 
-    def cols_to_df(self, cols: List[Any], names: Optional[List[str]] = None) -> TDf:
+    def cols_to_df(
+        self,
+        cols: List[Any],
+        names: Optional[List[str]] = None,
+        reference: Union[TCol, TDf, None] = None,
+    ) -> TDf:
         """Construct the dataframe from a list of columns (series)
 
-        :param cols: the collection of series or constants, at least one value must
+        :param cols: the collection of series or scalars, at least one value must
             be a series
         :param names: the correspondent column names, defaults to None
+        :param reference: the reference series of dataframe when all cols are scalars
+            , defaults to None
 
         :return: the dataframe
 
