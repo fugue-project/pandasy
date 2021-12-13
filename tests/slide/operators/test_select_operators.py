@@ -1,16 +1,16 @@
 import pandas as pd
-from slide.operators.select_operators import SelectExecutionContext, SelectExecutionPlan
+from slide.operators.map_operators import MapOperationsContext, MapExecutionPlan
 from slide_pandas import PandasUtils
 from slide_test.utils import assert_duck_eq, assert_pdf_eq
-from triad import Schema
+from triad import Schema, to_uuid
 import pyarrow as pa
 from pytest import raises
 
 
 def test_col_op():
     pdf = pd.DataFrame([[0, 1.1, True], [3, 4.1, False]], columns=["a", "b", "c"])
-    ctx = SelectExecutionContext(PandasUtils(), pdf)
-    plan = SelectExecutionPlan(Schema("a:uint,b:float32,c:bool").pa_schema)
+    ctx = MapOperationsContext(PandasUtils(), pdf)
+    plan = MapExecutionPlan(Schema("a:uint,b:float32,c:bool").pa_schema)
     col0 = plan.col("c")
     assert pa.bool_() == col0.output_type
     assert "c" == col0.output_name
@@ -34,8 +34,8 @@ def test_col_op():
 
 def test_lit_op():
     pdf = pd.DataFrame([[0, 1.1, True], [3, 4.1, False]], columns=["a", "b", "c"])
-    ctx = SelectExecutionContext(PandasUtils(), pdf)
-    plan = SelectExecutionPlan(Schema("a:uint,b:float32,c:bool").pa_schema)
+    ctx = MapOperationsContext(PandasUtils(), pdf)
+    plan = MapExecutionPlan(Schema("a:uint,b:float32,c:bool").pa_schema)
     col0 = plan.lit(None)
     assert pa.null() == col0.output_type
     col1 = plan.lit("abc")
@@ -57,8 +57,8 @@ def test_lit_op():
 
 def test_pure_lit_op():
     pdf = pd.DataFrame([[0, 1.1, True], [3, 4.1, False]], columns=["a", "b", "c"])
-    ctx = SelectExecutionContext(PandasUtils(), pdf)
-    plan = SelectExecutionPlan(Schema("a:uint,b:float32,c:bool").pa_schema)
+    ctx = MapOperationsContext(PandasUtils(), pdf)
+    plan = MapExecutionPlan(Schema("a:uint,b:float32,c:bool").pa_schema)
     col0 = plan.lit(None)
     assert pa.null() == col0.output_type
     col1 = plan.lit("abc")
@@ -80,8 +80,8 @@ def test_pure_lit_op():
 
 def test_unary_op():
     pdf = pd.DataFrame([[0, 1.1, True], [3, 4.1, False]], columns=["a", "b", "c"])
-    ctx = SelectExecutionContext(PandasUtils(), pdf)
-    plan = SelectExecutionPlan(Schema("a:uint,b:float32,c:bool").pa_schema)
+    ctx = MapOperationsContext(PandasUtils(), pdf)
+    plan = MapExecutionPlan(Schema("a:uint,b:float32,c:bool").pa_schema)
     col0 = plan.col("c")
     col1 = plan.col("a")
     col2 = plan.col("b")
@@ -118,10 +118,183 @@ def test_unary_op():
     )
 
 
+def test_binary_op_num():
+    pdf = pd.DataFrame([[1, 1.1], [3, 4.1]], columns=["a", "b"])
+    ctx = MapOperationsContext(PandasUtils(), pdf)
+    plan = MapExecutionPlan(Schema("a:uint,b:float32").pa_schema)
+    col1 = plan.col("a")
+    col2 = plan.col("b")
+    cola = plan.binary("+", col1, col1)
+    assert pa.int64() == cola.output_type
+    colb = plan.binary("-", col1, col1)
+    assert pa.int64() == colb.output_type
+    colc = plan.binary("*", col1, col1)
+    assert pa.int64() == colc.output_type
+    cold = plan.binary("/", col1, plan.lit(2))
+    assert pa.int64() == cold.output_type
+
+    cole = plan.binary("+", col1, col2)
+    assert pa.float64() == cole.output_type
+    colf = plan.binary("-", col1, col2)
+    assert pa.float64() == colf.output_type
+    colg = plan.binary("*", col1, col2)
+    assert pa.float64() == colg.output_type
+    colh = plan.binary("/", col1, col2)
+    assert pa.float64() == colh.output_type
+
+    coli = plan.binary("+", col2, col1)
+    assert pa.float64() == coli.output_type
+    colj = plan.binary("-", col2, col1)
+    assert pa.float64() == colj.output_type
+    colk = plan.binary("*", col2, col1)
+    assert pa.float64() == colk.output_type
+    coll = plan.binary("/", col2, col1)
+    assert pa.float64() == coll.output_type
+
+    colm = plan.binary("+", col2, col2)
+    assert pa.float64() == colm.output_type
+    coln = plan.binary("-", col2, col2)
+    assert pa.float64() == coln.output_type
+    colo = plan.binary("*", col2, col2)
+    assert pa.float64() == colo.output_type
+    colp = plan.binary("/", col2, col2)
+    assert pa.float64() == colp.output_type
+
+    plan.output(
+        (cola, "a"),
+        (colb, "b"),
+        (colc, "c"),
+        (cold, "d"),
+        (cole, "e"),
+        (colf, "f"),
+        (colg, "g"),
+        (colh, "h"),
+        (coli, "i"),
+        (colj, "j"),
+        (colk, "k"),
+        (coll, "l"),
+        (colm, "m"),
+        (coln, "n"),
+        (colo, "o"),
+        (colp, "p"),
+    )
+    plan.execute(ctx)
+
+    assert_duck_eq(
+        ctx.output,
+        """
+        SELECT
+            a+a AS a, a-a AS b, a*a AS c, a/2 AS d,
+            a+b AS e, a-b AS f, a*b AS g, a/b AS h,
+            b+a AS i, b-a AS j, b*a AS k, b/a AS l,
+            b+b AS m, b-b AS n, b*b AS o, b/b AS p
+        FROM a
+        """,
+        a=pdf,
+        check_order=False,
+    )
+
+
+def test_binary_op_logical():
+    pdf = pd.DataFrame(
+        [
+            [True, True],
+            [True, False],
+            [True, None],
+            [False, True],
+            [False, False],
+            [False, None],
+            [None, True],
+            [None, False],
+            [None, None],
+        ],
+        columns=["a", "b"],
+    )
+    ctx = MapOperationsContext(PandasUtils(), pdf)
+    plan = MapExecutionPlan(Schema("a:bool,b:bool").pa_schema)
+    col1 = plan.col("a")
+    col2 = plan.col("b")
+    cola = plan.binary("&", col1, col2)
+    assert pa.bool_() == cola.output_type
+    colb = plan.binary("|", col1, col2)
+    assert pa.bool_() == colb.output_type
+    colc = plan.binary("&", col1, plan.lit(True))
+    assert pa.bool_() == colc.output_type
+    cold = plan.binary("&", col1, plan.lit(False))
+    assert pa.bool_() == cold.output_type
+    cole = plan.binary("&", col1, plan.lit(None))
+    assert pa.bool_() == cole.output_type
+    colf = plan.binary("|", col1, plan.lit(True))
+    assert pa.bool_() == colf.output_type
+    colg = plan.binary("|", col1, plan.lit(False))
+    assert pa.bool_() == colg.output_type
+    colh = plan.binary("|", col1, plan.lit(None))
+    assert pa.bool_() == colh.output_type
+
+    plan.output(
+        (cola, "a"),
+        (colb, "b"),
+        (colc, "c"),
+        (cold, "d"),
+        (cole, "e"),
+        (colf, "f"),
+        (colg, "g"),
+        (colh, "h"),
+    )
+    plan.execute(ctx)
+
+    assert_duck_eq(
+        ctx.output,
+        """
+        SELECT
+            a AND b AS a, a OR b AS b,
+            a AND TRUE AS c, a AND FALSE AS d, a AND NULL AS e,
+            a OR TRUE AS f, a OR FALSE AS g, a OR NULL AS h
+        FROM a
+        """,
+        a=pdf,
+        check_order=False,
+    )
+
+
+def test_binary_op_logical_2():
+    pdf = pd.DataFrame(
+        [
+            [True, True],
+            [True, False],
+        ],
+        columns=["a", "b"],
+    )
+    ctx = MapOperationsContext(PandasUtils(), pdf)
+    plan = MapExecutionPlan(Schema("a:bool,b:bool").pa_schema)
+    output = []
+    sql = []
+    n = 0
+    for op in ["&", "|"]:
+        for left in [True, False, None]:
+            for right in [True, False, None]:
+                name = f"_{n}"
+                col = plan.binary(op, plan.lit(left), plan.lit(right))
+                assert pa.bool_() == col.output_type
+                output.append((col, name))
+                ls = "NULL" if left is None else str(left).upper()
+                rs = "NULL" if right is None else str(right).upper()
+                o = "AND" if op == "&" else "OR"
+                sql.append(f"{ls} {o} {rs} AS {name}")
+                n += 1
+    plan.output(*output)
+    plan.execute(ctx)
+
+    _sql = ", ".join(sql)
+    assert_duck_eq(
+        ctx.output, f"SELECT {_sql} FROM a", a=pdf, check_order=False, debug=True
+    )
+
+
 def test_plan():
     pdf = pd.DataFrame([[0, 1.1], [3, 4.1]], columns=["a", "b"])
-    ctx = SelectExecutionContext(PandasUtils(), pdf)
-    plan = SelectExecutionPlan(Schema("a:int,b:float").pa_schema)
+    ctx = MapOperationsContext(PandasUtils(), pdf)
+    plan = MapExecutionPlan(Schema("a:int,b:float").pa_schema)
     col1 = plan.col("b")
     col2 = plan.col("a")
     col3 = plan.binary("+", col1, col2)
@@ -139,3 +312,22 @@ def test_plan():
         a=pdf,
         check_order=False,
     )
+
+
+def test_plan_uuid():
+    plan1 = MapExecutionPlan(Schema("a:int,b:float32").pa_schema)
+    plan2 = MapExecutionPlan(Schema("a:int,b:float64").pa_schema)
+    plan3 = MapExecutionPlan(Schema("a:int,b:float64").pa_schema)
+    assert to_uuid(plan1) != to_uuid(plan2)
+    assert to_uuid(plan3) == to_uuid(plan2)
+
+    plan2.col("a")
+    plan3.col("b")
+    tid = to_uuid(plan2)
+    assert to_uuid(plan3) != to_uuid(plan2)
+    
+    plan2.col("a")
+    assert tid == to_uuid(plan2)
+    plan2.col("b")
+    assert tid != to_uuid(plan2)
+

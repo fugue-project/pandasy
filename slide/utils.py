@@ -171,6 +171,10 @@ class SlideUtils(Generic[TDf, TCol]):
         if op == "*":
             return col1 * col2
         if op == "/":
+            # for int/int, we should force the output to int
+            # but int columns can be in non-int types so it is impossible
+            # to judge from the dtypes of the input, so the logic using
+            # this function should be responsible to do this check
             return col1 / col2
         raise NotImplementedError(f"{op} is not supported")  # pragma: no cover
 
@@ -223,12 +227,16 @@ class SlideUtils(Generic[TDf, TCol]):
         c2 = self._safe_bool(col2)
         if op == "and":
             if not self.is_series(c1) and not self.is_series(c2):
+                if c1 is None:
+                    return c2 and c1
                 return c1 and c2
-            return c1 & c2
+            return (pd.NA if c1 is None else c1) & (pd.NA if c2 is None else c2)
         elif op == "or":
             if not self.is_series(c1) and not self.is_series(c2):
+                if c1 is None:
+                    return c2 or c1
                 return c1 or c2
-            return c1 | c2
+            return (pd.NA if c1 is None else c1) | (pd.NA if c2 is None else c2)
         raise NotImplementedError(f"{op} is not supported")  # pragma: no cover
 
     def logical_not(self, col: Any) -> Any:

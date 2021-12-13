@@ -334,14 +334,20 @@ class SlideTestSuite(object):
                 df["j"] = self.utils.binary_logical_op(True, None, op)
                 df["k"] = self.utils.binary_logical_op(False, None, op)
                 df["l"] = self.utils.binary_logical_op(None, None, op)
+                df["m"] = self.utils.binary_logical_op(None, True, op)
+                df["n"] = self.utils.binary_logical_op(None, False, op)
+                df["o"] = self.utils.binary_logical_op(df.a, None, op)
+                df["p"] = self.utils.binary_logical_op(None, df.b, op)
 
                 assert_duck_eq(
-                    self.to_pd(df[list("defghijkl")]),
+                    self.to_pd(df[list("defghijklmnop")]),
                     f"""
                     SELECT
                         a {op} b AS d, a {op} TRUE AS e, TRUE {op} b AS f,
                         a {op} FALSE AS g, FALSE {op} b AS h, TRUE {op} FALSE AS i,
-                        TRUE {op} NULL AS j, FALSE {op} NULL AS k, NULL {op} NULL AS l
+                        TRUE {op} NULL AS j, FALSE {op} NULL AS k, NULL {op} NULL AS l,
+                        NULL {op} TRUE AS m, NULL {op} FALSE AS n,
+                        a {op} NULL AS o, NULL {op} b AS p
                     FROM pdf
                     """,
                     pdf=pdf,

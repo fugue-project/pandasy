@@ -1,11 +1,12 @@
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pyarrow as pa
+import pandas as pd
 from slide.utils import SlideUtils
 from triad import Schema, to_uuid
 
 
-class SelectOperator:
+class MapOperator:
     def __init__(self, *args: Any, **kwargs: Any):
         self._args = args
         self._kwargs = kwargs
@@ -20,7 +21,7 @@ class SelectOperator:
     def key(self) -> str:
         return "_" + to_uuid(self)[:8]
 
-    def execute(self, context: "SelectExecutionContext") -> None:
+    def execute(self, context: "MapOperationsContext") -> None:
         raise NotImplementedError  # pragma: no cover
 
     @property
@@ -35,7 +36,7 @@ class SelectOperator:
         return self._uuid
 
 
-class GetColumn(SelectOperator):
+class GetColumn(MapOperator):
     def __init__(self, name: str, input_type: pa.DataType):
         super().__init__(name)
         self._name = name
@@ -49,11 +50,11 @@ class GetColumn(SelectOperator):
     def output_name(self) -> Optional[str]:
         return self._name
 
-    def execute(self, context: "SelectExecutionContext") -> None:
+    def execute(self, context: "MapOperationsContext") -> None:
         context[self] = context.df[self._name]
 
 
-class LitColumn(SelectOperator):
+class LitColumn(MapOperator):
     def __init__(self, value: Any, input_type: Optional[pa.DataType] = None):
         super().__init__(value)
         self._value = value
@@ -63,12 +64,12 @@ class LitColumn(SelectOperator):
     def output_type(self) -> pa.DataType:
         return self._output_type
 
-    def execute(self, context: "SelectExecutionContext") -> None:
+    def execute(self, context: "MapOperationsContext") -> None:
         context[self] = self._value
 
 
-class UnaryOperator(SelectOperator):
-    def __init__(self, op: str, col: SelectOperator):
+class UnaryOperator(MapOperator):
+    def __init__(self, op: str, col: MapOperator):
         super().__init__(op, col)
         self._op = op
         self._col = col
@@ -82,7 +83,7 @@ class UnaryOperator(SelectOperator):
     def output_name(self) -> Optional[str]:
         return self._col.output_name
 
-    def execute(self, context: "SelectExecutionContext") -> None:
+    def execute(self, context: "MapOperationsContext") -> None:
         if self._op in ["+", "-"]:
             context[self] = context.utils.unary_arithmetic_op(
                 context[self._col], op=self._op
@@ -107,8 +108,8 @@ class UnaryOperator(SelectOperator):
         raise ValueError(f"'{op}' can't be applied to {input_type}")
 
 
-class BinaryOperator(SelectOperator):
-    def __init__(self, op: str, col1: SelectOperator, col2: SelectOperator):
+class BinaryOperator(MapOperator):
+    def __init__(self, op: str, col1: MapOperator, col2: MapOperator):
         super().__init__(op, col1, col2)
         self._op = op
         self._col1 = col1
@@ -121,11 +122,18 @@ class BinaryOperator(SelectOperator):
     def output_type(self) -> pa.DataType:
         return self._output_type
 
-    def execute(self, context: "SelectExecutionContext") -> None:
+    def execute(self, context: "MapOperationsContext") -> None:
         if self._op in ["+", "-", "*", "/"]:
-            context[self] = context.utils.binary_arithmetic_op(
+            res = context.utils.binary_arithmetic_op(
                 context[self._col1], context[self._col2], op=self._op
             )
+            if (  # int/int -> int
+                pa.types.is_integer(self._col1.output_type)
+                and pa.types.is_integer(self._col2.output_type)
+                and not pd.api.types.is_integer_dtype(res.dtype)
+            ):
+                res = context.utils.cast(res, "int64")
+            context[self] = res
         elif self._op in ["&", "|"]:
             context[self] = context.utils.binary_logical_op(
                 context[self._col1],
@@ -172,18 +180,20 @@ class BinaryOperator(SelectOperator):
             if (pa.types.is_boolean(t1) or pa.types.is_null(t1)) and (
                 pa.types.is_boolean(t2) or pa.types.is_null(t2)
             ):
-                return pa.boolean()
-        raise ValueError(f"'{op}' can't be applied to {t1} and {t2}")
+                return pa.bool_()
+        raise ValueError(  # pragma: no cover
+            f"'{op}' can't be applied to {t1} and {t2}"
+        )
 
 
-class OutputOperator(SelectOperator):
-    def __init__(self, *args: Union[SelectOperator, Tuple[SelectOperator, str]]):
+class MapOutputOperator(MapOperator):
+    def __init__(self, *args: Union[MapOperator, Tuple[MapOperator, str]]):
         self._data: List[Any] = [
-            (x, x.output_name) if isinstance(x, SelectOperator) else x for x in args
+            (x, x.output_name) if isinstance(x, MapOperator) else x for x in args
         ]
         super().__init__(*self._data)
 
-    def execute(self, context: "SelectExecutionContext") -> None:
+    def execute(self, context: "MapOperationsContext") -> None:
         cols = [context[x] for x, _ in self._data]
         names = [y for _, y in self._data]
         context.set_output(
@@ -191,7 +201,7 @@ class OutputOperator(SelectOperator):
         )
 
 
-class SelectExecutionContext:
+class MapOperationsContext:
     def __init__(self, utils: SlideUtils, df: Any):
         self._utils = utils
         self._df = df
@@ -213,20 +223,20 @@ class SelectExecutionContext:
     def set_output(self, df: Any) -> None:
         self._output = df
 
-    def __setitem__(self, op: SelectOperator, value: Any) -> None:
+    def __setitem__(self, op: MapOperator, value: Any) -> None:
         self._results[op.key] = value
 
-    def __getitem__(self, op: SelectOperator) -> None:
+    def __getitem__(self, op: MapOperator) -> None:
         return self._results[op.key]
 
 
-class SelectExecutionPlan:
+class MapExecutionPlan:
     def __init__(self, input_schema: pa.Schema):
         self._input_schema = input_schema
-        self._steps: List[SelectOperator] = []
-        self._steps_dict: Dict[str, SelectOperator] = {}
+        self._steps: List[MapOperator] = []
+        self._steps_dict: Dict[str, MapOperator] = {}
 
-    def add(self, op: SelectOperator) -> SelectOperator:
+    def add(self, op: MapOperator) -> MapOperator:
         key = op.key
         if key in self._steps_dict:
             return self._steps_dict[key]
@@ -234,24 +244,20 @@ class SelectExecutionPlan:
         self._steps.append(op)
         return op
 
-    def col(self, name: str) -> SelectOperator:
+    def col(self, name: str) -> MapOperator:
         return self.add(GetColumn(name, self._input_schema.field_by_name(name).type))
 
-    def lit(
-        self, value: Any, input_type: Optional[pa.DataType] = None
-    ) -> SelectOperator:
+    def lit(self, value: Any, input_type: Optional[pa.DataType] = None) -> MapOperator:
         return self.add(LitColumn(value, input_type))
 
-    def unary(self, op: str, col: SelectOperator) -> SelectOperator:
+    def unary(self, op: str, col: MapOperator) -> MapOperator:
         return self.add(UnaryOperator(op, col))
 
-    def binary(
-        self, op: str, col1: SelectOperator, col2: SelectOperator
-    ) -> SelectOperator:
+    def binary(self, op: str, col1: MapOperator, col2: MapOperator) -> MapOperator:
         return self.add(BinaryOperator(op, col1, col2))
 
-    def output(self, *args: Union[SelectOperator, Tuple[SelectOperator, str]]) -> None:
-        self.add(OutputOperator(*args))
+    def output(self, *args: Union[MapOperator, Tuple[MapOperator, str]]) -> None:
+        self.add(MapOutputOperator(*args))
 
     def __len__(self) -> int:
         return len(self._steps)
@@ -259,6 +265,6 @@ class SelectExecutionPlan:
     def __uuid__(self) -> str:
         return to_uuid(str(Schema(self._input_schema)), self._steps)
 
-    def execute(self, context: SelectExecutionContext) -> None:
+    def execute(self, context: MapOperationsContext) -> None:
         for step in self._steps:
             step.execute(context)
