@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import pyarrow as pa
 from slide.exceptions import SlideInvalidOperation
@@ -43,11 +43,11 @@ class Context:
     def set_output(self, df: Any) -> None:
         self._output = df
 
-    def __setitem__(self, op: Operator, value: Any) -> None:
-        self._results[op.key] = value
+    def __setitem__(self, op: Union[str, Operator], value: Any) -> None:
+        self._results[op if isinstance(op, str) else op.key] = value
 
-    def __getitem__(self, op: Operator) -> None:
-        return self._results[op.key]
+    def __getitem__(self, op: Union[str, Operator]) -> None:
+        return self._results[op if isinstance(op, str) else op.key]
 
 
 class Graph:

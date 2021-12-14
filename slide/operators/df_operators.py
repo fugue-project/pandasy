@@ -12,9 +12,9 @@ class DataFrameOperator(Operator):
 
 
 class GetDataFrameOperator(DataFrameOperator):
-    def __init__(self, df: Any, input_schema: pa.Schema):
-        super().__init__(id(df), str(input_schema))
-        self._df = df
+    def __init__(self, name: str, input_schema: pa.Schema):
+        super().__init__(name, str(input_schema))
+        self._name = name
         self._schema = input_schema
 
     @property
@@ -22,7 +22,7 @@ class GetDataFrameOperator(DataFrameOperator):
         return self._schema
 
     def execute(self, context: Context) -> None:
-        context[self] = self._df
+        context[self] = context[self._name]
 
 
 class SelectOperator(DataFrameOperator):
