@@ -305,10 +305,11 @@ def test_plan():
     col6 = plan.unary("-", col5)
     # a, b, a+b as x, a+b-2 as y, -(a+b) as z
     plan.output(col1, col2, (col3, "x"), (col4, "y"), (col6, "z"))
+    assert Schema(plan.output_schema) == "b:float,a:int,x:double,y:double,z:double"
     plan.execute(ctx)
     assert_duck_eq(
         ctx.output,
-        "SELECT a, b, a+b AS x, a+b-2 AS y, -(a+b) AS z FROM a",
+        "SELECT b, a, a+b AS x, a+b-2 AS y, -(a+b) AS z FROM a",
         a=pdf,
         check_order=False,
     )
@@ -325,9 +326,8 @@ def test_plan_uuid():
     plan3.col("b")
     tid = to_uuid(plan2)
     assert to_uuid(plan3) != to_uuid(plan2)
-    
+
     plan2.col("a")
     assert tid == to_uuid(plan2)
     plan2.col("b")
     assert tid != to_uuid(plan2)
-
