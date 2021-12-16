@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -32,25 +32,59 @@ class PandasUtils(SlideUtils[pd.DataFrame, pd.Series]):
     def series_to_array(self, col: pd.Series) -> List[Any]:
         return col.tolist()
 
-    def to_constant_series(
+    def scalar_to_series(
         self,
-        constant: Any,
-        from_series: pd.Series,
+        scalar: Any,
+        reference: Union[pd.Series, pd.DataFrame],
         dtype: Any = None,
         name: Optional[str] = None,
     ) -> pd.Series:
-        return pd.Series(constant, index=from_series.index, dtype=dtype, name=name)
+        if pa.types.is_nested(pa.scalar(scalar).type):
+            assert_or_throw(
+                dtype is None or is_object_dtype(dtype),
+                ValueError(
+                    "for nested scalar type, dtype must be None or dtype(object)"
+                ),
+            )
+            if self.is_series(reference):
+                res = reference.map(lambda _: scalar)
+            else:
+                res = reference[reference.columns[0]].map(lambda _: scalar)
+            if name is not None:
+                res = res.rename(name)
+            return res
+        return pd.Series(scalar, index=reference.index, dtype=dtype, name=name)
 
     def cols_to_df(
-        self, cols: List[pd.Series], names: Optional[List[str]] = None
+        self,
+        cols: List[Any],
+        names: Optional[List[str]] = None,
+        reference: Union[pd.Series, pd.DataFrame, None] = None,
     ) -> pd.DataFrame:
-        assert_or_throw(
-            any(self.is_series(s) for s in cols),
-            SlideInvalidOperation("at least one value in cols should be series"),
-        )
+        _cols = list(cols)
+        _ref: Any = None
+        _nested: List[int] = []
+        for i in range(len(cols)):
+            if self.is_series(_cols[i]):
+                if _ref is None:
+                    _ref = _cols[i]
+            elif pa.types.is_nested(pa.scalar(_cols[i]).type):
+                _nested.append(i)
+        if _ref is None:
+            assert_or_throw(
+                reference is not None,
+                SlideInvalidOperation(
+                    "reference can't be null when all cols are scalars"
+                ),
+            )
+            _cols[0] = self.scalar_to_series(_cols[0], reference=reference)
+            _ref = _cols[0]
+        for n in _nested:
+            if not self.is_series(_cols[n]):
+                _cols[n] = self.scalar_to_series(_cols[n], reference=_ref)
         if names is None:
-            return pd.DataFrame({c.name: c for c in cols})
-        return pd.DataFrame(dict(zip(names, cols)))
+            return pd.DataFrame({c.name: c for c in _cols})
+        return pd.DataFrame(dict(zip(names, _cols)))
 
     def as_pandas(self, df: pd.DataFrame) -> pd.DataFrame:
         return df

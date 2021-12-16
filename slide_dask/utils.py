@@ -1,4 +1,4 @@
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, Union
 
 import dask.dataframe as dd
 import numpy as np
@@ -8,6 +8,7 @@ from slide.exceptions import SlideInvalidOperation
 from slide.utils import SlideUtils
 from triad.utils.assertion import assert_or_throw
 from triad.utils.pyarrow import to_pandas_dtype
+from pandas.api.types import is_object_dtype
 
 
 class DaskUtils(SlideUtils[dd.DataFrame, dd.Series]):
@@ -33,38 +34,76 @@ class DaskUtils(SlideUtils[dd.DataFrame, dd.Series]):
     def series_to_array(self, col: dd.Series) -> List[Any]:
         return col.compute().tolist()
 
-    def to_constant_series(
+    def scalar_to_series(
         self,
-        constant: Any,
-        from_series: dd.Series,
+        scalar: Any,
+        reference: Union[dd.Series, dd.DataFrame],
         dtype: Any = None,
         name: Optional[str] = None,
     ) -> dd.Series:
+        if pa.types.is_nested(pa.scalar(scalar).type):
+            assert_or_throw(
+                dtype is None or is_object_dtype(dtype),
+                ValueError(
+                    "for nested scalar type, dtype must be None or dtype(object)"
+                ),
+            )
+            if self.is_series(reference):
+                return reference.map(lambda _: scalar, meta=(name, dtype))
+            else:
+                return reference[reference.columns[0]].map(
+                    lambda _: scalar, meta=(name, dtype)
+                )
         if dtype is not None:
-            return from_series.map(lambda _: constant, meta=(name, dtype))
-        tdf = from_series.to_frame()
+            if self.is_series(reference):
+                return reference.map(lambda _: scalar, meta=(name, dtype))
+            else:
+                return reference[reference.columns[0]].map(
+                    lambda _: scalar, meta=(name, dtype)
+                )
+        tdf = reference.to_frame() if isinstance(reference, dd.Series) else reference
         tn = name or "_tmp_"
-        tdf[tn] = constant
+        tdf[tn] = scalar
         return tdf[tn]
 
-    def cols_to_df(
-        self, cols: List[Any], names: Optional[List[str]] = None
+    def cols_to_df(  # noqa: C901
+        self,
+        cols: List[Any],
+        names: Optional[List[str]] = None,
+        reference: Union[dd.Series, dd.DataFrame, None] = None,
     ) -> dd.DataFrame:
-        assert_or_throw(
-            any(self.is_series(s) for s in cols),
-            SlideInvalidOperation("at least one value in cols should be series"),
-        )
+        _cols = list(cols)
+        _ref: Any = None
+        _nested: List[int] = []
+        _ref_idx = -1
+        for i in range(len(cols)):
+            if self.is_series(_cols[i]):
+                if _ref is None:
+                    _ref = _cols[i]
+                    _ref_idx = i
+            elif pa.types.is_nested(pa.scalar(_cols[i]).type):
+                _nested.append(i)
+        if _ref is None:
+            assert_or_throw(
+                reference is not None,
+                SlideInvalidOperation(
+                    "reference can't be null when all cols are scalars"
+                ),
+            )
+            _cols[0] = self.scalar_to_series(_cols[0], reference=reference)
+            _ref = _cols[0]
+            _ref_idx = 0
+        for n in _nested:
+            if not self.is_series(_cols[n]):
+                _cols[n] = self.scalar_to_series(_cols[n], reference=_ref)
         if names is None:
             col_names: List[str] = [c.name for c in cols]
         else:
             col_names = names
-        for i in range(len(cols)):
-            if self.is_series(cols[i]):
-                break
-        tdf = cols[i].to_frame(col_names[i])
-        for j in range(len(cols)):
-            if i != j:
-                tdf[col_names[j]] = cols[j]
+        tdf = _ref.to_frame(col_names[_ref_idx])
+        for j in range(len(_cols)):
+            if _ref_idx != j:
+                tdf[col_names[j]] = _cols[j]
         return tdf[col_names]
 
     def is_compatile_index(self, df: dd.DataFrame) -> bool:

@@ -1,5 +1,4 @@
 import json
-import pickle
 from datetime import date, datetime
 from typing import Any
 from unittest import TestCase
@@ -93,15 +92,44 @@ class SlideTestSuite(object):
                 pd.DataFrame(dict(x=[0, 1], y=[2, 3], z=[4, 5], w=[2, 3])),
             )
 
-        def test_to_constant_series(self):
+        def test_scalar_to_series(self):
             s = self.utils.to_series(pd.Series([0, 1], name="x"))
-            s1 = self.utils.to_constant_series("a", s, name="y")
-            s2 = self.utils.to_constant_series(None, s, name="z", dtype="float64")
+            s1 = self.utils.scalar_to_series("a", s, name="y")
+            s2 = self.utils.scalar_to_series(None, s, name="z", dtype="float64")
             df = self.utils.cols_to_df([s, s1, s2])
             assert_pdf_eq(
                 self.to_pd(df),
                 pd.DataFrame(dict(x=[0, 1], y=["a", "a"], z=[None, None])),
             )
+
+            s = self.to_df(pd.DataFrame(dict(x=pd.Series([0, 1]))))
+            s1 = self.utils.scalar_to_series("a", s, name="y")
+            s2 = self.utils.scalar_to_series(None, s, name="z", dtype="float64")
+            df = self.utils.cols_to_df([s1, s2])
+            assert_pdf_eq(
+                self.to_pd(df),
+                pd.DataFrame(dict(y=["a", "a"], z=[None, None])),
+            )
+
+            s = self.utils.to_series(pd.Series([0, 1], name="x"))
+            s1 = self.utils.scalar_to_series({"x": 1}, s, name="y")
+            s2 = self.utils.scalar_to_series(
+                [1, 2], s, name="z", dtype=np.dtype(object)
+            )
+            df = self.utils.cols_to_df([s1, s2])
+            assert [[{"x": 1}, [1, 2]], [{"x": 1}, [1, 2]]] == self.to_pd(
+                df
+            ).values.tolist()
+
+            s = self.to_df(pd.DataFrame(dict(x=pd.Series([0, 1]))))
+            s1 = self.utils.scalar_to_series(
+                {"x": 1}, s, name="y", dtype=np.dtype(object)
+            )
+            s2 = self.utils.scalar_to_series([1, 2], s, name="z")
+            df = self.utils.cols_to_df([s1, s2])
+            assert [[{"x": 1}, [1, 2]], [{"x": 1}, [1, 2]]] == self.to_pd(
+                df
+            ).values.tolist()
 
         def test_get_col_pa_type(self):
             df = self.to_df(
@@ -306,14 +334,20 @@ class SlideTestSuite(object):
                 df["j"] = self.utils.binary_logical_op(True, None, op)
                 df["k"] = self.utils.binary_logical_op(False, None, op)
                 df["l"] = self.utils.binary_logical_op(None, None, op)
+                df["m"] = self.utils.binary_logical_op(None, True, op)
+                df["n"] = self.utils.binary_logical_op(None, False, op)
+                df["o"] = self.utils.binary_logical_op(df.a, None, op)
+                df["p"] = self.utils.binary_logical_op(None, df.b, op)
 
                 assert_duck_eq(
-                    self.to_pd(df[list("defghijkl")]),
+                    self.to_pd(df[list("defghijklmnop")]),
                     f"""
                     SELECT
                         a {op} b AS d, a {op} TRUE AS e, TRUE {op} b AS f,
                         a {op} FALSE AS g, FALSE {op} b AS h, TRUE {op} FALSE AS i,
-                        TRUE {op} NULL AS j, FALSE {op} NULL AS k, NULL {op} NULL AS l
+                        TRUE {op} NULL AS j, FALSE {op} NULL AS k, NULL {op} NULL AS l,
+                        NULL {op} TRUE AS m, NULL {op} FALSE AS n,
+                        a {op} NULL AS o, NULL {op} b AS p
                     FROM pdf
                     """,
                     pdf=pdf,
@@ -1116,7 +1150,7 @@ class SlideTestSuite(object):
                 check_order=False,
             )
 
-        def test_cast_constant(self):
+        def test_cast_scalar(self):
             assert self.utils.cast(None, bool) is None
             assert self.utils.cast(True, bool)
             assert not self.utils.cast(False, bool)
@@ -1793,6 +1827,42 @@ class SlideTestSuite(object):
                 check_order=False,
             )
 
+        def test_cast_nested(self):
+            # happy path
+            pdf = pd.DataFrame(dict(a=[None, [1, 2]], b=[{"d": "x"}, None]))
+
+            schema = Schema("a:[int],b:{d:str}").pa_schema
+            df = self.to_df(pdf, "a:[int],b:{d:str}")
+            df["h"] = self.utils.cast(df.a, schema[0].type)
+            df["i"] = self.utils.cast(df.b, schema[1].type, schema[1].type)
+
+            assert [[None, {"d": "x"}], [[1, 2], None]] == self.to_pd(
+                df[list("hi")]
+            ).values.tolist()
+
+            with raises(SlideCastError):
+                df["j"] = self.utils.cast(df.a, schema[0].type, str)
+
+            with raises(SlideCastError):
+                df["j"] = self.utils.cast(df.a, str, schema[0].type)
+
+        def test_cast_binary(self):
+            # happy path
+            pdf = pd.DataFrame(dict(a=[None, b"\0abc"]))
+
+            schema = Schema("a:binary").pa_schema
+            coerce = pd.__version__ >= "1.2"
+            df = self.to_df(pdf, "a:binary", coerce=coerce)
+            df["h"] = self.utils.cast(df.a, schema[0].type)
+
+            assert [[None], [b"\0abc"]] == self.to_pd(df[["h"]]).values.tolist()
+
+            with raises(SlideCastError):
+                df["j"] = self.utils.cast(df.a, schema[0].type, str)
+
+            with raises(SlideCastError):
+                df["j"] = self.utils.cast(df.a, str, schema[0].type)
+
         def test_cast_df(self):
             a = pd.DataFrame(dict(a=[1, 2, None], b=[True, None, False]))
             df = self.utils.cast_df(
@@ -1850,6 +1920,25 @@ class SlideTestSuite(object):
             with raises(SlideInvalidOperation):
                 res = self.utils.cols_to_df([123, 456], names=["x", "y"])
 
+            res = self.utils.cols_to_df([123, 456], names=["x", "y"], reference=df)
+            assert_pdf_eq(
+                self.to_pd(res), self.to_pd(self.to_df([[123, 456]], "x:long,y:long"))
+            )
+
+            # has nested type, all scalars
+            res = self.utils.cols_to_df([[1, 2], 456], names=["x", "y"], reference=df)
+            assert [[[1, 2], 456]] == self.to_pd(res).values.tolist()
+
+            res = self.utils.cols_to_df([456, [1, 2]], names=["x", "y"], reference=df)
+            assert [[456, [1, 2]]] == self.to_pd(res).values.tolist()
+
+            # has nested type, and series
+            res = self.utils.cols_to_df([[1, 2], df["a"]], names=["x", "y"])
+            assert [[[1, 2], "a"]] == self.to_pd(res).values.tolist()
+
+            res = self.utils.cols_to_df([df["a"], [1, 2]], names=["x", "y"])
+            assert [["a", [1, 2]]] == self.to_pd(res).values.tolist()
+
         def test_to_schema(self):
             df = self.to_df([[1.0, 2], [2.0, 3]])
             raises(ValueError, lambda: self.utils.to_schema(df))
@@ -1892,130 +1981,170 @@ class SlideTestSuite(object):
             df = df.reset_index(drop=True)
             self.utils.ensure_compatible(df)
 
-        def test_as_array_iterable(self):
+        def test_converter_not_safe(self):
             schema = Schema("a:str,b:int").pa_schema
+            c = self.utils.create_native_converter(schema, type_safe=False)
             df = self.to_df([], "a:str,b:int")
-            assert [] == self.utils.as_array(df, schema)
-            assert [] == self.utils.as_array(df, schema, type_safe=True)
+            assert [] == c.as_arrays(df)
+            assert [] == list(c.as_array_iterable(df))
+            assert [] == c.as_dicts(df)
+            assert [] == list(c.as_dict_iterable(df))
 
-            df = self.to_df([["a", 1]], "a:str,b:int")
-            assert [["a", 1]] == self.utils.as_array(df, schema)
-            assert [["a", 1]] == self.utils.as_array(df, schema, columns=["a", "b"])
-            assert [[1, "a"]] == self.utils.as_array(df, schema, columns=["b", "a"])
-
-            # prevent pandas auto type casting
-            schema = Schema("a:double,b:int").pa_schema
-            df = self.to_df([[1.0, 1.0]], "a:double,b:int")
-            data = self.utils.as_array(df, schema)
-            assert [[1.0, 1]] == data
-            assert isinstance(data[0][0], float)
-            assert isinstance(data[0][1], int)
-            assert [[1.0, 1]] == self.utils.as_array(df, schema, columns=["a", "b"])
-            assert [[1, 1.0]] == self.utils.as_array(df, schema, columns=["b", "a"])
-
-            df = self.to_df([[np.float64(1.0), 1.0]], "a:double,b:int")
-            assert [[1.0, 1]] == self.utils.as_array(df, schema)
-            assert isinstance(self.utils.as_array(df, schema)[0][0], float)
-            assert isinstance(self.utils.as_array(df, schema)[0][1], int)
-
-            schema = Schema("a:datetime,b:int").pa_schema
-            df = self.to_df(
-                [[pd.Timestamp("2020-01-01"), 1.0]],
-                "a:datetime,b:int",
-            )
-            assert [[datetime(2020, 1, 1), 1]] == self.utils.as_array(df, schema)
-            assert isinstance(
-                self.utils.as_array(df, schema, type_safe=True)[0][0], datetime
-            )
-            assert isinstance(
-                self.utils.as_array(df, schema, type_safe=True)[0][1], int
-            )
-
-            df = self.to_df([[pd.NaT, 1.0]], "a:datetime,b:int")
-            assert self.utils.as_array(df, schema, type_safe=True)[0][0] is None
-            assert isinstance(
-                self.utils.as_array(df, schema, type_safe=True)[0][1], int
-            )
+            df = self.to_df([["xx", 123]], "a:str,b:int")
+            assert [["xx", 123]] == c.as_arrays(df)
+            assert [["xx", 123]] == list(c.as_array_iterable(df))
+            assert [{"a": "xx", "b": 123}] == c.as_dicts(df)
+            assert [{"a": "xx", "b": 123}] == list(c.as_dict_iterable(df))
 
             schema = Schema("a:double,b:int").pa_schema
-            df = self.to_df([[1.0, 1.0]], "a:double,b:int")
-            assert [[1.0, 1]] == self.utils.as_array(df, schema, type_safe=True)
-            assert isinstance(self.utils.as_array(df, schema)[0][0], float)
-            assert isinstance(self.utils.as_array(df, schema)[0][1], int)
+            c = self.utils.create_native_converter(schema, type_safe=False)
+            df = self.to_df([[1.1, 1.1]], "a:double,b:double")
+            res = c.as_arrays(df)
+            assert [[1.1, 1.1]] == res
+            assert isinstance(res[0][1], float)
 
-        def test_as_array_iterable_datetime(self):
+            schema = Schema("a:datetime,b:date").pa_schema
+            c = self.utils.create_native_converter(schema, type_safe=False)
             df = self.to_df(
-                [[datetime(2020, 1, 1, 2, 3, 4, 5), date(2020, 2, 2)]],
-                columns="a:datetime,b:date",
+                [[datetime(2020, 1, 1), date(2020, 1, 2)]], "a:datetime,b:date"
             )
-            v1 = list(
-                self.utils.as_array_iterable(
-                    df, schema=expression_to_schema("a:datetime,b:date"), type_safe=True
-                )
-            )[0]
-            assert not isinstance(v1[0], pd.Timestamp)
-            assert isinstance(v1[0], datetime)
-            assert isinstance(v1[1], date)
+            res = c.as_arrays(df)
+            assert [[datetime(2020, 1, 1), date(2020, 1, 2)]] == res
 
-        def test_nested(self):
-            # data = [[dict(b=[30, "40"])]]
-            # s = expression_to_schema("a:{a:str,b:[int]}")
-            # df = self.to_df(data, "a:{a:str,b:[int]}")
-            # a = df.as_array(type_safe=True)
-            # assert [[dict(a=None, b=[30, 40])]] == a
+        def test_converter_simple(self):
+            schema = Schema("a:bool,b:int").pa_schema
+            c = self.utils.create_native_converter(schema, type_safe=True)
+            df = self.to_df([[True, None], [None, 1], [None, None]], "a:bool,b:int")
+            res = c.as_arrays(df)
+            expected = [[True, None], [None, 1], [None, None]]
+            assert expected == res
+            res = list(c.as_array_iterable(df))
+            assert expected == res
+            res = c.as_dicts(df)
+            assert [dict(zip(["a", "b"], x)) for x in expected] == res
+            res = list(c.as_dict_iterable(df))
+            assert [dict(zip(["a", "b"], x)) for x in expected] == res
 
-            data = [[[json.dumps(dict(b=[30, "40"]))]]]
-            df = self.to_df(data, "a:[{a:str,b:[int]}]", coerce=False)
-            a = self.utils.as_array(
-                df, schema=Schema("a:[{a:str,b:[int]}]").pa_schema, type_safe=True
+            schema = Schema("a:str,b:double").pa_schema
+            c = self.utils.create_native_converter(schema, type_safe=True)
+            df = self.to_df([["ab", None], [None, 1.1], [None, None]], "a:str,b:double")
+            res = list(c.as_array_iterable(df))
+            expected = [["ab", None], [None, 1.1], [None, None]]
+            assert expected == res
+            res = list(c.as_array_iterable(df))
+            assert expected == res
+            res = c.as_dicts(df)
+            assert [dict(zip(["a", "b"], x)) for x in expected] == res
+            res = list(c.as_dict_iterable(df))
+            assert [dict(zip(["a", "b"], x)) for x in expected] == res
+
+            schema = Schema("a:datetime,b:date").pa_schema
+            c = self.utils.create_native_converter(schema, type_safe=True)
+            df = self.to_df(
+                [[datetime(2020, 1, 1), datetime(2020, 1, 2)]], "a:datetime,b:date"
             )
-            assert [[[dict(a=None, b=[30, 40])]]] == a
+            res = c.as_arrays(df)
+            expected = [[datetime(2020, 1, 1), date(2020, 1, 2)]]
+            assert expected == res
+            assert isinstance(res[0][0], datetime)
+            assert isinstance(res[0][1], date)
+            res = list(c.as_array_iterable(df))
+            assert expected == res
+            res = c.as_dicts(df)
+            assert [dict(zip(["a", "b"], x)) for x in expected] == res
+            res = list(c.as_dict_iterable(df))
+            assert [dict(zip(["a", "b"], x)) for x in expected] == res
 
-            data = [[json.dumps(["1", 2])]]
-            df = self.to_df(data, "a:[int]", coerce=False)
-            a = self.utils.as_array(
-                df, schema=Schema("a:[int]").pa_schema, type_safe=True
-            )
+        def test_converter_nested(self):
+            data = [[dict(b=[30, "40"])]]
+            schema = expression_to_schema("a:{a:str,b:[int]}")
+            c = self.utils.create_native_converter(schema, type_safe=True)
+            df = self.to_df(data, "a:{a:str,b:[int]}")
+            a = c.as_arrays(df)
+            assert [[dict(a=None, b=[30, 40])]] == a
+            a = list(c.as_array_iterable(df))
+            assert [[dict(a=None, b=[30, 40])]] == a
+            a = c.as_dicts(df)
+            assert [{"a": dict(a=None, b=[30, 40])}] == a
+            a = list(c.as_dict_iterable(df))
+            assert [{"a": dict(a=None, b=[30, 40])}] == a
+
+            data = [[json.dumps(dict(b=[30, "40"]))]]
+            df = self.to_df(data, "a:str")
+            a = c.as_arrays(df)
+            assert [[dict(a=None, b=[30, 40])]] == a
+
+            data = [[["1", 2]]]
+            schema = expression_to_schema("a:[int]")
+            c = self.utils.create_native_converter(schema, type_safe=True)
+            df = self.to_df(data, "a:[int]")
+            a = c.as_arrays(df)
             assert [[[1, 2]]] == a
 
-        def test_binary(self):
-            b = pickle.dumps("xyz")
-            data = [[b, b"xy"]]
-            df = self.to_df(data, "a:bytes,b:bytes")
-            a = self.utils.as_array(
-                df, schema=Schema("a:bytes,b:bytes").pa_schema, type_safe=True
-            )
-            assert [[b, b"xy"]] == a
+            data = [[json.dumps(["1", 2])]]
+            schema = expression_to_schema("a:[int]")
+            c = self.utils.create_native_converter(schema, type_safe=True)
+            df = self.to_df(data, "a:str")
+            a = c.as_arrays(df)
+            assert [[[1, 2]]] == a
 
-        def test_nan_none(self):
+        def test_converter_binary(self):
+            data = [[b"\0abc"]]
+            schema = expression_to_schema("a:binary")
+            c = self.utils.create_native_converter(schema, type_safe=True)
+            df = self.to_df(data, "a:binary")
+            a = c.as_arrays(df)
+            assert [[b"\0abc"]] == a
+            a = list(c.as_array_iterable(df))
+            assert [[b"\0abc"]] == a
+            a = c.as_dicts(df)
+            assert [{"a": b"\0abc"}] == a
+            a = list(c.as_dict_iterable(df))
+            assert [{"a": b"\0abc"}] == a
+
+        def test_converter_hybrid(self):
+            data = [[b"\0abc", 1, [1, 2], "ab"]]
+            schema = expression_to_schema("a:binary,b:long,c:[long],d:str")
+            c = self.utils.create_native_converter(schema, type_safe=True)
+            df = self.to_df(data, "a:binary,b:long,c:[long],d:str")
+            a = c.as_arrays(df)
+            assert data == a
+            a = list(c.as_array_iterable(df))
+            assert data == a
+            a = c.as_dicts(df)
+            assert [{"a": b"\0abc", "b": 1, "c": [1, 2], "d": "ab"}] == a
+            a = list(c.as_dict_iterable(df))
+            assert [{"a": b"\0abc", "b": 1, "c": [1, 2], "d": "ab"}] == a
+
+        def test_converter_nan_none(self):
             schema = Schema("b:str,c:double").pa_schema
+            c = self.utils.create_native_converter(schema, type_safe=True)
             df = self.to_df([[None, None]], "b:str,c:double")
-            arr = self.utils.as_array(df, schema, type_safe=True)[0]
-            assert arr[0] is None
-            assert arr[1] is None
-
-            df = self.to_df([], "b:str,c:double")
-            assert len(self.utils.as_array(df, schema)) == 0
+            a = c.as_arrays(df)
+            assert a[0][0] is None
+            assert a[0][1] is None
 
             schema = Schema("b:int,c:bool").pa_schema
+            c = self.utils.create_native_converter(schema, type_safe=True)
             df = self.to_df([[None, None]], "b:int,c:bool")
-            arr = self.utils.as_array(df, schema, type_safe=True)[0]
-            assert arr[0] is None
-            assert arr[1] is None
+            a = c.as_arrays(df)
+            assert a[0][0] is None
+            assert a[0][1] is None
 
-        def test_boolean_enforce(self):
+        def test_converter_boolean(self):
             schema = Schema("b:int,c:bool").pa_schema
+            c = self.utils.create_native_converter(schema, type_safe=True)
             df = self.to_df([[1, True], [2, False], [3, None]], "b:int,c:bool")
-            arr = self.utils.as_array(df, schema, type_safe=True)
-            assert [[1, True], [2, False], [3, None]] == arr
+            a = c.as_arrays(df)
+            assert [[1, True], [2, False], [3, None]] == a
 
-            df = self.to_df([[1, 1], [2, 0]], "b:int,c:bool")
-            arr = self.utils.as_array(df, schema, type_safe=True)
-            assert [[1, True], [2, False]] == arr
+            df = self.to_df([[1, 1], [2, 0]], "b:int,c:int")
+            a = c.as_arrays(df)
+            assert [[1, True], [2, False]] == a
 
-            df = self.to_df([[1, 1.0], [2, 0.0]], "b:int,c:bool")
-            arr = self.utils.as_array(df, schema, type_safe=True)
-            assert [[1, True], [2, False]] == arr
+            df = self.to_df([[1, 1.0], [2, 0.0]], "b:int,c:double")
+            a = c.as_arrays(df)
+            assert [[1, True], [2, False]] == a
 
         def test_sql_group_by_apply(self):
             df = self.to_df([["a", 1], ["a", 2], [None, 3]], "b:str,c:long")
@@ -2588,4 +2717,19 @@ class SlideTestSuite(object):
                 a=a,
                 b=b,
                 c=c,
+            )
+
+        def test_drop_select_columns(self):
+            pdf = pd.DataFrame([[0, 1, 2], [3, 4, 5]], columns=["a", "b", "c"])
+            df = self.to_df(pdf)
+            assert_pdf_eq(
+                self.to_pd(self.utils.select_columns(df, ["a", "c"])),
+                pd.DataFrame([[0, 2], [3, 5]], columns=["a", "c"]),
+                check_order=False,
+            )
+
+            assert_pdf_eq(
+                self.to_pd(self.utils.drop_columns(df, ["a", "c"])),
+                pd.DataFrame([[1], [4]], columns=["b"]),
+                check_order=False,
             )
