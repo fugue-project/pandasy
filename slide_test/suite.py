@@ -2718,3 +2718,18 @@ class SlideTestSuite(object):
                 b=b,
                 c=c,
             )
+
+        def test_drop_select_columns(self):
+            pdf = pd.DataFrame([[0, 1, 2], [3, 4, 5]], columns=["a", "b", "c"])
+            df = self.to_df(pdf)
+            assert_pdf_eq(
+                self.to_pd(self.utils.select_columns(df, ["a", "c"])),
+                pd.DataFrame([[0, 2], [3, 5]], columns=["a", "c"]),
+                check_order=False,
+            )
+
+            assert_pdf_eq(
+                self.to_pd(self.utils.drop_columns(df, ["a", "c"])),
+                pd.DataFrame([[1], [4]], columns=["b"]),
+                check_order=False,
+            )

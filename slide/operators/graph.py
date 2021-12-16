@@ -1,9 +1,14 @@
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Set
 
 import pyarrow as pa
 from slide.exceptions import SlideInvalidOperation
 from slide.utils import SlideUtils
 from triad import assert_or_throw, to_uuid
+
+
+class Node:
+    def __init__(self, parents: Set["Node"]):
+        self._parents = parents
 
 
 class Operator:
@@ -46,7 +51,7 @@ class Context:
     def __setitem__(self, op: Union[str, Operator], value: Any) -> None:
         self._results[op if isinstance(op, str) else op.key] = value
 
-    def __getitem__(self, op: Union[str, Operator]) -> None:
+    def __getitem__(self, op: Union[str, Operator]) -> Any:
         return self._results[op if isinstance(op, str) else op.key]
 
 

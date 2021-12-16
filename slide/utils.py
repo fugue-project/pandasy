@@ -734,6 +734,25 @@ class SlideUtils(Generic[TDf, TCol]):
 
         return pa.schema(list(get_fields()))
 
+    def drop_columns(self, df: TDf, columns: List[str]) -> TDf:
+        """Drop columns from the dataframe
+
+        :param df: the dataframe
+        :param columns: columns to be dropped
+        :return: the new dataframe without those columns
+        """
+        cols = [c for c in df.columns if c not in columns]
+        return df[cols]
+
+    def select_columns(self, df: TDf, columns: List[str]) -> TDf:
+        """Select columns from the dataframe
+
+        :param df: the dataframe
+        :param columns: columns to be chosen
+        :return: the new dataframe with those columns
+        """
+        return df[columns]
+
     def cast_df(  # noqa: C901
         self, df: TDf, schema: pa.Schema, input_schema: Optional[pa.Schema] = None
     ) -> TDf:
